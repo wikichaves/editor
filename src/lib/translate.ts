@@ -1,0 +1,79 @@
+import type Anthropic from "@anthropic-ai/sdk";
+
+/**
+ * Translation model. Swap for the cheaper alternative if cost matters:
+ *   "claude-haiku-4-5-20251001"
+ */
+export const TRANSLATION_MODEL = "claude-sonnet-4-6";
+
+const SYSTEM_PROMPT =
+  "You are a professional literary translator. Translate the text from English to Spanish. Preserve paragraph breaks exactly. Do not add notes, explanations, or markdown. Output only the translation.";
+
+/** Target chunk size in characters, splitting on paragraph breaks. */
+const MAX_CHUNK_CHARS = 3500;
+
+/**
+ * Split text into chunks of roughly MAX_CHUNK_CHARS, respecting paragraph
+ * breaks (\n\n). A single paragraph longer than the limit is hard-split.
+ */
+export function chunkText(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
+  const paragraphs = text.split(/\n\n+/);
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const para of paragraphs) {
+    if (para.length > maxChars) {
+      if (current) {
+        chunks.push(current);
+        current = "";
+      }
+      for (let i = 0; i < para.length; i += maxChars) {
+        chunks.push(para.slice(i, i + maxChars));
+      }
+      continue;
+    }
+
+    const candidate = current ? `${current}\n\n${para}` : para;
+    if (candidate.length > maxChars) {
+      if (current) chunks.push(current);
+      current = para;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Translate the full text EN→ES chunk by chunk, preserving order, and
+ * concatenate the results back together with paragraph breaks.
+ */
+export async function translateText(
+  client: Anthropic,
+  fullText: string,
+  onProgress?: (done: number, total: number) => void,
+): Promise<string> {
+  const chunks = chunkText(fullText);
+  const translated: string[] = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    const message = await client.messages.create({
+      model: TRANSLATION_MODEL,
+      max_tokens: 8192,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: chunks[i] }],
+    });
+
+    const text = message.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+
+    translated.push(text.trim());
+    onProgress?.(i + 1, chunks.length);
+  }
+
+  return translated.join("\n\n");
+}
