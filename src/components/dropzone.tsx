@@ -18,14 +18,17 @@ export function Dropzone({ onFile, onReject, disabled }: DropzoneProps) {
     if (!file) return;
     // Accept by extension OR MIME type. Many mobile file pickers report an
     // empty type, so when the type is unknown we let the server decide (it
-    // checks the %PDF header). Only reject when it's clearly not a PDF.
-    const looksLikePdf =
-      file.name.toLowerCase().endsWith(".pdf") ||
+    // checks the file's magic bytes). Only reject when it's clearly wrong.
+    const name = file.name.toLowerCase();
+    const looksSupported =
+      /\.(pdf|epub|azw3|azw|mobi)$/.test(name) ||
       file.type === "application/pdf" ||
+      file.type === "application/epub+zip" ||
+      file.type === "application/x-mobipocket-ebook" ||
       file.type === "";
-    if (!looksLikePdf) {
+    if (!looksSupported) {
       onReject?.(
-        `"${file.name}" no es un PDF. Subí un archivo .pdf con texto (no escaneado).`,
+        `"${file.name}" no es un formato soportado. Subí un PDF, EPUB o AZW3 con texto.`,
       );
       return;
     }
@@ -67,16 +70,16 @@ export function Dropzone({ onFile, onReject, disabled }: DropzoneProps) {
       <UploadCloud className="size-8 text-[var(--muted-foreground)]" />
       <div className="space-y-1">
         <p className="text-sm font-medium">
-          Arrastrá un PDF acá o hacé clic para elegir
+          Arrastrá un PDF, EPUB o AZW3 acá o hacé clic para elegir
         </p>
         <p className="text-xs text-[var(--muted-foreground)]">
-          Solo PDFs con texto (no escaneados). Sin imágenes en la salida.
+          Archivos con texto (no escaneados). Sin imágenes en la salida.
         </p>
       </div>
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf,.pdf"
+        accept=".pdf,.epub,.azw3,.azw,.mobi,application/pdf,application/epub+zip,application/x-mobipocket-ebook"
         className="hidden"
         disabled={disabled}
         onChange={(e) => {

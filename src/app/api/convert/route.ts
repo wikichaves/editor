@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { extractPdfText } from "@/lib/pdf";
+import { detectKind, extractBookText } from "@/lib/extract";
 import { translateText } from "@/lib/translate";
 import { buildEpub } from "@/lib/epub";
 
@@ -28,37 +28,29 @@ export async function POST(req: NextRequest) {
   }
   const data = new Uint8Array(await file.arrayBuffer());
 
-  // Detect a PDF by its magic bytes (%PDF) instead of trusting the file name,
-  // so files without a .pdf extension still work as long as they're real PDFs.
-  const isPdf =
-    data.length > 4 &&
-    data[0] === 0x25 && // %
-    data[1] === 0x50 && // P
-    data[2] === 0x44 && // D
-    data[3] === 0x46; // F
-  if (!isPdf) {
+  // Detect the format by magic bytes instead of trusting the file name.
+  if (!detectKind(data)) {
     return NextResponse.json(
-      { error: "El archivo no parece ser un PDF (no tiene la cabecera %PDF)." },
+      { error: "Formato no reconocido. Subí un PDF, EPUB o AZW3." },
       { status: 400 },
     );
   }
 
-  let pages: string[];
+  let fullText: string;
   try {
-    pages = await extractPdfText(data);
-  } catch {
-    return NextResponse.json(
-      { error: "No se pudo leer el PDF." },
-      { status: 422 },
-    );
+    fullText = (await extractBookText(data)).trim();
+  } catch (err) {
+    // Extractors throw user-facing messages (DRM, HUFF/CDIC, invalid EPUB…).
+    const message =
+      err instanceof Error ? err.message : "No se pudo leer el archivo.";
+    return NextResponse.json({ error: message }, { status: 422 });
   }
 
-  const fullText = pages.join("\n\n").trim();
   if (!fullText) {
     return NextResponse.json(
       {
         error:
-          "El PDF no tiene capa de texto (¿está escaneado?). Por ahora solo se admiten PDFs con texto.",
+          "El archivo no tiene capa de texto (¿está escaneado?). Solo se admiten archivos con texto.",
       },
       { status: 422 },
     );
@@ -75,7 +67,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const title = file.name.replace(/\.pdf$/i, "");
+  const title = file.name.replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
   const epubBuffer = await buildEpub(title, spanish);
 
   return new NextResponse(new Uint8Array(epubBuffer), {

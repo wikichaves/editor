@@ -76,10 +76,10 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle>PDF → ePub en español</CardTitle>
+          <CardTitle>PDF · EPUB · AZW3 → ePub en español</CardTitle>
           <CardDescription>
-            Subí un PDF en inglés (con texto) y descargá un ePub traducido al
-            español. La salida no incluye imágenes.
+            Subí un PDF, EPUB o AZW3 en inglés (con texto) y descargá un ePub
+            traducido al español. La salida no incluye imágenes.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

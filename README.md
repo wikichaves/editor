@@ -1,18 +1,24 @@
-# PDF → ePub (Español)
+# PDF · EPUB · AZW3 → ePub (Español)
 
-App web personal que convierte un **PDF en inglés** (con capa de texto) en un
-**ePub en español**, sin imágenes. Pensada para PDFs modestos (decenas de
-páginas) con texto seleccionable — no soporta OCR ni PDFs escaneados.
+App web personal que convierte un libro **en inglés** (con capa de texto) en un
+**ePub en español**, sin imágenes. Acepta **PDF**, **EPUB** y **AZW3** como
+entrada — no soporta OCR ni archivos escaneados.
 
 ## Cómo funciona
 
-1. Subís un `.pdf` en el dropzone.
-2. El endpoint `POST /api/convert` extrae el texto con [`unpdf`](https://github.com/unjs/unpdf)
-   (descarta imágenes), lo trocea en bloques de ~3500 caracteres respetando
-   los saltos de párrafo, traduce cada bloque EN→ES con la API de Anthropic
+1. Subís un `.pdf`, `.epub` o `.azw3` en el dropzone.
+2. El endpoint `POST /api/convert` detecta el formato por sus *magic bytes* (no
+   por la extensión) y extrae el texto según corresponda:
+   - **PDF** con [`unpdf`](https://github.com/unjs/unpdf).
+   - **EPUB** descomprimiendo el ZIP y leyendo el XHTML en orden del *spine*
+     (con [`jszip`](https://stuk.github.io/jszip/)).
+   - **AZW3/MOBI** con un parser propio *best-effort* (PDB + PalmDOC). DRM y
+     compresión HUFF/CDIC se rechazan con un mensaje claro.
+3. Trocea el texto en bloques de ~3500 caracteres respetando los saltos de
+   párrafo, traduce cada bloque EN→ES con la API de Anthropic
    (`claude-sonnet-4-6`) y arma el ePub en memoria con
    [`epub-gen-memory`](https://github.com/cpiber/epub-gen-memory).
-3. El navegador descarga el `.epub` resultante.
+4. El navegador descarga el `.epub` resultante.
 
 Todo corre en el runtime **Node.js** (no Edge) y el ePub se genera **en
 memoria** — nunca se escribe a disco, así anda en serverless (Vercel).
@@ -21,7 +27,7 @@ memoria** — nunca se escribe a disco, así anda en serverless (Vercel).
 
 - Next.js 15 (App Router) + React 19 + TypeScript
 - Tailwind v4 + componentes estilo shadcn/ui
-- `@anthropic-ai/sdk`, `unpdf`, `epub-gen-memory`
+- `@anthropic-ai/sdk`, `unpdf`, `jszip`, `epub-gen-memory`
 
 ## Setup local
 
@@ -62,6 +68,12 @@ Si tenés Pro / Fluid Compute, podés subirlo hasta `300` en
 
 En `src/lib/translate.ts`, la constante `TRANSLATION_MODEL`. Alternativa más
 barata: `claude-haiku-4-5-20251001`.
+
+## Sobre AZW3 (best-effort)
+
+El parser de AZW3/MOBI cubre la mayoría de los archivos (sin comprimir y
+PalmDOC), pero **no** soporta DRM ni compresión HUFF/CDIC. Si un AZW3 falla,
+convertilo antes a EPUB con [Calibre](https://calibre-ebook.com/) y subí ese.
 
 ## Fuera de alcance
 
