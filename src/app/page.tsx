@@ -27,12 +27,14 @@ export default function Home() {
   const [fileName, setFileName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [error, setError] = React.useState("");
+  const [progress, setProgress] = React.useState(0);
   const [result, setResult] = React.useState<ConvertResult | null>(null);
 
   async function handleFile(file: File) {
     setFileName(file.name);
     setError("");
     setResult(null);
+    setProgress(0);
 
     try {
       // 1. Upload straight to Blob (skips the 4.5 MB serverless limit).
@@ -41,6 +43,8 @@ export default function Home() {
         access: "public",
         handleUploadUrl: "/api/upload",
         contentType: file.type || "application/octet-stream",
+        multipart: true, // split into parts + retry — helps on slow connections
+        onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
       });
 
       // 2. Convert (extract → translate → build → store → email).
@@ -89,6 +93,7 @@ export default function Home() {
     setStatus("idle");
     setFileName("");
     setError("");
+    setProgress(0);
     setResult(null);
   }
 
@@ -128,13 +133,21 @@ export default function Home() {
           {busy && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-14 text-center">
               <Loader2 className="size-8 animate-spin text-[var(--muted-foreground)]" />
-              <div className="space-y-1">
+              <div className="w-full space-y-1">
                 <p className="text-sm font-medium">
-                  {status === "uploading" ? "Subiendo…" : "Procesando…"}
+                  {status === "uploading" ? `Subiendo… ${progress}%` : "Procesando…"}
                 </p>
+                {status === "uploading" && (
+                  <div className="mx-auto mt-2 h-2 w-full max-w-xs overflow-hidden rounded-full bg-[var(--muted)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-200"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                )}
                 <p className="text-xs text-[var(--muted-foreground)]">
                   {status === "uploading"
-                    ? "Subiendo el archivo."
+                    ? "Subiendo el archivo al almacenamiento."
                     : "Extrayendo el texto, traduciendo y armando el ePub. Puede tardar según el tamaño."}
                 </p>
                 <p className="truncate text-xs text-[var(--muted-foreground)]">
