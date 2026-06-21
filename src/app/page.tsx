@@ -16,10 +16,10 @@ import {
 type Status = "idle" | "uploading" | "processing" | "done" | "error";
 
 interface ConvertResult {
-  title: string;
-  downloadUrl: string;
-  emailed: boolean;
-  emailError?: string;
+  title?: string;
+  downloadUrl?: string;
+  async?: boolean;
+  email?: string;
 }
 
 export default function Home() {
@@ -37,30 +37,22 @@ export default function Home() {
     setProgress(0);
 
     try {
-      // Under Vercel's 4.5 MB request limit we POST the file directly — no Blob
-      // hop (more reliable, especially on flaky connections). Larger files go
-      // through Blob to bypass that limit.
-      const DIRECT_LIMIT = 4 * 1024 * 1024;
+      const wantsEmail = email.trim().length > 0;
       let res: Response;
 
-      if (file.size <= DIRECT_LIMIT) {
-        setStatus("processing");
-        const fd = new FormData();
-        fd.append("file", file);
-        if (email.trim()) fd.append("email", email.trim());
-        res = await fetch("/api/convert", { method: "POST", body: fd });
-      } else {
-        // 1. Upload straight to Blob (skips the request-body limit).
+      if (wantsEmail) {
+        // Email path: upload to Blob (multipart = retries, survives flaky
+        // connections), then kick off a background job that emails the result.
+        // The browser never has to stay connected during the long conversion.
         setStatus("uploading");
         const blob = await upload(file.name, file, {
           access: "public",
           handleUploadUrl: "/api/upload",
           contentType: file.type || "application/octet-stream",
-          multipart: true, // parts + retry — helps on slow connections
+          multipart: true,
           onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
         });
 
-        // 2. Convert from the blob URL.
         setStatus("processing");
         res = await fetch("/api/convert", {
           method: "POST",
@@ -68,9 +60,34 @@ export default function Home() {
           body: JSON.stringify({
             blobUrl: blob.url,
             filename: file.name,
-            email: email.trim() || undefined,
+            email: email.trim(),
           }),
         });
+      } else {
+        // No email → synchronous inline download. Small files go straight to
+        // the function; larger ones via Blob to bypass the request-body limit.
+        const DIRECT_LIMIT = 4 * 1024 * 1024;
+        if (file.size <= DIRECT_LIMIT) {
+          setStatus("processing");
+          const fd = new FormData();
+          fd.append("file", file);
+          res = await fetch("/api/convert", { method: "POST", body: fd });
+        } else {
+          setStatus("uploading");
+          const blob = await upload(file.name, file, {
+            access: "public",
+            handleUploadUrl: "/api/upload",
+            contentType: file.type || "application/octet-stream",
+            multipart: true,
+            onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
+          });
+          setStatus("processing");
+          res = await fetch("/api/convert", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ blobUrl: blob.url, filename: file.name }),
+          });
+        }
       }
 
       if (!res.ok) {
@@ -128,7 +145,11 @@ export default function Home() {
             <>
               <label className="block space-y-1.5">
                 <span className="text-sm font-medium">
-                  Email (opcional) — te mandamos el ePub
+                  Email — te mandamos el ePub (recomendado)
+                </span>
+                <span className="block text-xs font-normal text-[var(--muted-foreground)]">
+                  Con email no necesitás esperar ni mantener la página abierta —
+                  ideal para archivos grandes, OCR o conexión lenta.
                 </span>
                 <input
                   type="email"
@@ -174,28 +195,42 @@ export default function Home() {
           {status === "done" && result && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-12 text-center">
               <CheckCircle2 className="size-8 text-green-600" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium">¡Listo!</p>
-                {result.emailed && (
-                  <p className="flex items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)]">
-                    <Mail className="size-3.5" /> Te lo enviamos por email.
-                  </p>
-                )}
-                {!result.emailed && result.emailError && (
-                  <p className="text-xs text-amber-600">
-                    No se pudo enviar el email ({result.emailError}). Usá la
-                    descarga.
-                  </p>
-                )}
-              </div>
-              <a href={result.downloadUrl} download>
-                <Button size="sm">
-                  <FileDown className="size-4" /> Descargar .epub
-                </Button>
-              </a>
-              <Button onClick={reset} variant="outline" size="sm">
-                Convertir otro
-              </Button>
+              {result.async ? (
+                <>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">¡Recibido!</p>
+                    <p className="flex items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                      <Mail className="size-3.5" /> Te lo enviamos a {result.email} cuando
+                      termine (unos minutos).
+                    </p>
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      Ya podés cerrar esta página.
+                    </p>
+                  </div>
+                  <Button onClick={reset} variant="outline" size="sm">
+                    Convertir otro
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">¡Listo!</p>
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      La descarga del .epub debería empezar.
+                    </p>
+                  </div>
+                  {result.downloadUrl && (
+                    <a href={result.downloadUrl} download>
+                      <Button size="sm">
+                        <FileDown className="size-4" /> Descargar .epub
+                      </Button>
+                    </a>
+                  )}
+                  <Button onClick={reset} variant="outline" size="sm">
+                    Convertir otro
+                  </Button>
+                </>
+              )}
             </div>
           )}
 

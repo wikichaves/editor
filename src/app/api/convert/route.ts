@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { put } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
 import { translateText } from "@/lib/translate";
 import { ocrTranslatePdf } from "@/lib/ocr";
 import { buildEpub } from "@/lib/epub";
-import { emailEpub } from "@/lib/email";
+import { emailEpub, emailFailure } from "@/lib/email";
 
 // Must run on Node.js (Buffer + native-free libs), not Edge.
 export const runtime = "nodejs";
@@ -18,6 +18,33 @@ interface ConvertBody {
   email?: string;
 }
 
+/** Extract/OCR → translate → build the Spanish ePub. Throws user-facing errors. */
+async function buildSpanishEpub(
+  data: Uint8Array,
+  filename: string | undefined,
+): Promise<{ title: string; epub: Buffer }> {
+  const kind = detectKind(data);
+  if (!kind) throw new Error("Formato no reconocido. Subí un PDF, EPUB o AZW3.");
+
+  const fullText = (await extractBookText(data)).trim();
+  const needsOcr = kind === "pdf" && fullText.length < 30; // scanned PDF
+
+  if (!fullText && !needsOcr) {
+    throw new Error(
+      "El archivo no tiene capa de texto y no se pudo hacer OCR. Solo se admiten archivos con texto (o PDFs escaneados).",
+    );
+  }
+
+  const client = new Anthropic();
+  const spanish = needsOcr
+    ? await ocrTranslatePdf(client, data)
+    : await translateText(client, fullText);
+
+  const title = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
+  const epub = await buildEpub(title, spanish);
+  return { title, epub };
+}
+
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
@@ -26,8 +53,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Accept either a direct multipart upload (small files, ≤ ~4.5 MB) or a Blob
-  // URL (large files that bypassed the serverless request-body limit).
+  // Accept either a direct multipart upload (small files) or a Blob URL.
   const contentType = req.headers.get("content-type") || "";
   let data: Uint8Array;
   let filename: string | undefined;
@@ -78,73 +104,51 @@ export async function POST(req: NextRequest) {
     data = new Uint8Array(await file.arrayBuffer());
   }
 
-  const wantsEmail = !!email?.trim();
-  if (wantsEmail && !process.env.RESEND_API_KEY) {
-    return NextResponse.json(
-      { error: "El envío por email no está configurado (falta RESEND_API_KEY)." },
-      { status: 500 },
-    );
-  }
+  const to = email?.trim();
 
-  const kind = detectKind(data);
-  if (!kind) {
+  // Validate the format up front so obvious errors return immediately.
+  if (!detectKind(data)) {
     return NextResponse.json(
       { error: "Formato no reconocido. Subí un PDF, EPUB o AZW3." },
       { status: 400 },
     );
   }
 
-  let fullText: string;
+  // --- Async path: deliver by email so a flaky connection doesn't need to
+  // stay open during a long OCR/translation. Returns immediately. ---
+  if (to) {
+    if (!process.env.RESEND_API_KEY) {
+      return NextResponse.json(
+        { error: "El envío por email no está configurado (falta RESEND_API_KEY)." },
+        { status: 500 },
+      );
+    }
+    after(async () => {
+      try {
+        const { title, epub } = await buildSpanishEpub(data, filename);
+        await emailEpub({ to, title, epub });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "No se pudo convertir el archivo.";
+        await emailFailure(to, message).catch(() => {});
+      }
+    });
+    return NextResponse.json({ async: true, email: to });
+  }
+
+  // --- Sync path (no email): process now and return a download URL. ---
+  let result: { title: string; epub: Buffer };
   try {
-    fullText = (await extractBookText(data)).trim();
+    result = await buildSpanishEpub(data, filename);
   } catch (err) {
     const message =
-      err instanceof Error ? err.message : "No se pudo leer el archivo.";
+      err instanceof Error ? err.message : "No se pudo convertir el archivo.";
     return NextResponse.json({ error: message }, { status: 422 });
   }
 
-  // A PDF with (almost) no text layer is scanned → fall back to OCR.
-  const needsOcr = kind === "pdf" && fullText.length < 30;
-
-  if (!fullText && !needsOcr) {
-    return NextResponse.json(
-      {
-        error:
-          "El archivo no tiene capa de texto y no se pudo hacer OCR. Solo se admiten archivos con texto (o PDFs escaneados).",
-      },
-      { status: 422 },
-    );
-  }
-
-  const client = new Anthropic();
-  let spanish: string;
-  if (needsOcr) {
-    // Scanned PDF: Claude reads it natively and returns the Spanish text.
-    try {
-      spanish = await ocrTranslatePdf(client, data);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Falló el OCR del PDF escaneado.";
-      return NextResponse.json({ error: message }, { status: 422 });
-    }
-  } else {
-    try {
-      spanish = await translateText(client, fullText);
-    } catch {
-      return NextResponse.json(
-        { error: "Falló la traducción. Probá de nuevo en un rato." },
-        { status: 502 },
-      );
-    }
-  }
-
-  const title = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
-  const epubBuffer = await buildEpub(title, spanish);
-
-  // Store the result so it has a real URL (reliable download, also on mobile).
   let downloadUrl: string;
   try {
-    const blob = await put(`epubs/${title}.epub`, epubBuffer, {
+    const blob = await put(`epubs/${result.title}.epub`, result.epub, {
       access: "public",
       contentType: "application/epub+zip",
       addRandomSuffix: true,
@@ -157,17 +161,5 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Optionally email it as an attachment.
-  let emailed = false;
-  let emailError: string | undefined;
-  if (wantsEmail) {
-    try {
-      await emailEpub({ to: email!.trim(), title, epub: epubBuffer });
-      emailed = true;
-    } catch (err) {
-      emailError = err instanceof Error ? err.message : "No se pudo enviar el email.";
-    }
-  }
-
-  return NextResponse.json({ title, downloadUrl, emailed, emailError });
+  return NextResponse.json({ title: result.title, downloadUrl });
 }

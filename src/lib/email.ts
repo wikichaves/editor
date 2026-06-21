@@ -36,3 +36,19 @@ export async function emailEpub(opts: {
     throw new Error(`No se pudo enviar el email: ${error.message}`);
   }
 }
+
+/** Notify the user by email that their conversion failed (best-effort). */
+export async function emailFailure(to: string, detail: string): Promise<void> {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) return;
+
+  const resend = new Resend(apiKey);
+  const from = process.env.EMAIL_FROM || "Tero ePub <onboarding@resend.dev>";
+
+  await resend.emails.send({
+    from,
+    to,
+    subject: "No pudimos convertir tu archivo",
+    text: `Hubo un problema al convertir tu archivo:\n\n${detail}\n\nProbá de nuevo o con otro archivo.`,
+  });
+}
