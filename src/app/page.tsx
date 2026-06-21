@@ -119,8 +119,8 @@ export default function Home() {
         <CardHeader>
           <CardTitle>PDF · EPUB · AZW3 → ePub en español</CardTitle>
           <CardDescription>
-            Subí un PDF, EPUB o AZW3 en inglés (con texto) y descargá un ePub
-            traducido al español. La salida no incluye imágenes.
+            Subí un PDF (incluso escaneado), EPUB o AZW3 en inglés y descargá un
+            ePub traducido al español. La salida no incluye imágenes.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -215,7 +215,7 @@ export default function Home() {
       </Card>
 
       <p className="mt-4 text-center text-xs text-[var(--muted-foreground)]">
-        Traducción con Anthropic Claude · Sin OCR · Sin imágenes
+        Traducción con Anthropic Claude · OCR para escaneados · Sin imágenes
       </p>
     </main>
   );

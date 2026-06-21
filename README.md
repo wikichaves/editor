@@ -73,11 +73,18 @@ descarga estable (útil en celular, donde la descarga vía JS suele fallar).
      `onboarding@resend.dev` puede entregarte sin verificar un dominio.
 6. Deploy.
 
+### OCR de PDFs escaneados
+
+Si un PDF no tiene capa de texto (escaneado), se usa el **soporte nativo de
+PDF de Claude**: el archivo se manda tal cual al modelo, que lo lee (vía visión)
+y devuelve el texto ya traducido. No hay rasterización ni dependencias nativas.
+Límites por request: **100 páginas / 30 MB** (ver `src/lib/ocr.ts`).
+
 ### Sobre el límite de tiempo
 
-El handler declara `maxDuration = 60` (segundos), el máximo del plan Hobby.
-Si tenés Pro / Fluid Compute, podés subirlo hasta `300` en
-`src/app/api/convert/route.ts` para PDFs más largos.
+El handler declara `maxDuration = 300` (segundos), que requiere **Pro / Fluid
+Compute** (en Hobby el máximo es 60). El OCR de PDFs escaneados puede tardar,
+por eso conviene el límite alto.
 
 ## Cambiar el modelo de traducción
 
@@ -92,5 +99,6 @@ convertilo antes a EPUB con [Calibre](https://calibre-ebook.com/) y subí ese.
 
 ## Fuera de alcance
 
-Sin auth, sin base de datos, sin OCR, sin extracción/embebido de imágenes y sin
-reconstrucción de layouts complejos (columnas, tablas, fórmulas).
+Sin auth, sin base de datos, sin extracción/embebido de imágenes y sin
+reconstrucción de layouts complejos (columnas, tablas, fórmulas). El OCR cubre
+PDFs escaneados de hasta 100 páginas por request.

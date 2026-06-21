@@ -3,13 +3,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { put } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
 import { translateText } from "@/lib/translate";
+import { ocrTranslatePdf } from "@/lib/ocr";
 import { buildEpub } from "@/lib/epub";
 import { emailEpub } from "@/lib/email";
 
 // Must run on Node.js (Buffer + native-free libs), not Edge.
 export const runtime = "nodejs";
-// 60s on Hobby; bump to 300 if you have Fluid Compute / Pro for longer books.
-export const maxDuration = 60;
+// 300s requires Pro/Fluid; OCR of scanned PDFs can take a while.
+export const maxDuration = 300;
 
 interface ConvertBody {
   blobUrl?: string;
@@ -85,7 +86,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!detectKind(data)) {
+  const kind = detectKind(data);
+  if (!kind) {
     return NextResponse.json(
       { error: "Formato no reconocido. Subí un PDF, EPUB o AZW3." },
       { status: 400 },
@@ -101,11 +103,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 422 });
   }
 
-  if (!fullText) {
+  // A PDF with (almost) no text layer is scanned → fall back to OCR.
+  const needsOcr = kind === "pdf" && fullText.length < 30;
+
+  if (!fullText && !needsOcr) {
     return NextResponse.json(
       {
         error:
-          "El archivo no tiene capa de texto (¿está escaneado?). Solo se admiten archivos con texto.",
+          "El archivo no tiene capa de texto y no se pudo hacer OCR. Solo se admiten archivos con texto (o PDFs escaneados).",
       },
       { status: 422 },
     );
@@ -113,13 +118,24 @@ export async function POST(req: NextRequest) {
 
   const client = new Anthropic();
   let spanish: string;
-  try {
-    spanish = await translateText(client, fullText);
-  } catch {
-    return NextResponse.json(
-      { error: "Falló la traducción. Probá de nuevo en un rato." },
-      { status: 502 },
-    );
+  if (needsOcr) {
+    // Scanned PDF: Claude reads it natively and returns the Spanish text.
+    try {
+      spanish = await ocrTranslatePdf(client, data);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Falló el OCR del PDF escaneado.";
+      return NextResponse.json({ error: message }, { status: 422 });
+    }
+  } else {
+    try {
+      spanish = await translateText(client, fullText);
+    } catch {
+      return NextResponse.json(
+        { error: "Falló la traducción. Probá de nuevo en un rato." },
+        { status: 502 },
+      );
+    }
   }
 
   const title = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");

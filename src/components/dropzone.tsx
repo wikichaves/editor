@@ -73,7 +73,7 @@ export function Dropzone({ onFile, onReject, disabled }: DropzoneProps) {
           Arrastrá un PDF, EPUB o AZW3 acá o hacé clic para elegir
         </p>
         <p className="text-xs text-[var(--muted-foreground)]">
-          Archivos con texto (no escaneados). Sin imágenes en la salida.
+          PDF (incluso escaneado), EPUB o AZW3. Sin imágenes en la salida.
         </p>
       </div>
       <input
