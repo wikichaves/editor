@@ -57,7 +57,6 @@ export default function Home() {
           access: "public",
           handleUploadUrl: "/api/upload",
           contentType: file.type || "application/octet-stream",
-          multipart: true,
           onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
         });
         setStatus("processing");
