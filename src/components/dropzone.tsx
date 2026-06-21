@@ -16,7 +16,14 @@ export function Dropzone({ onFile, onReject, disabled }: DropzoneProps) {
 
   function pick(file: File | undefined | null) {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) {
+    // Accept by extension OR MIME type. Many mobile file pickers report an
+    // empty type, so when the type is unknown we let the server decide (it
+    // checks the %PDF header). Only reject when it's clearly not a PDF.
+    const looksLikePdf =
+      file.name.toLowerCase().endsWith(".pdf") ||
+      file.type === "application/pdf" ||
+      file.type === "";
+    if (!looksLikePdf) {
       onReject?.(
         `"${file.name}" no es un PDF. Subí un archivo .pdf con texto (no escaneado).`,
       );

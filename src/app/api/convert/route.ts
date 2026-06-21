@@ -26,14 +26,22 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  if (!file.name.toLowerCase().endsWith(".pdf")) {
+  const data = new Uint8Array(await file.arrayBuffer());
+
+  // Detect a PDF by its magic bytes (%PDF) instead of trusting the file name,
+  // so files without a .pdf extension still work as long as they're real PDFs.
+  const isPdf =
+    data.length > 4 &&
+    data[0] === 0x25 && // %
+    data[1] === 0x50 && // P
+    data[2] === 0x44 && // D
+    data[3] === 0x46; // F
+  if (!isPdf) {
     return NextResponse.json(
-      { error: "El archivo debe ser un PDF." },
+      { error: "El archivo no parece ser un PDF (no tiene la cabecera %PDF)." },
       { status: 400 },
     );
   }
-
-  const data = new Uint8Array(await file.arrayBuffer());
 
   let pages: string[];
   try {
