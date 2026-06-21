@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, FileDown, CheckCircle2, AlertCircle } from "lucide-react";
+import { upload } from "@vercel/blob/client";
+import { Loader2, FileDown, CheckCircle2, AlertCircle, Mail } from "lucide-react";
 import { Dropzone } from "@/components/dropzone";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,50 +13,68 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-type Status = "idle" | "processing" | "done" | "error";
+type Status = "idle" | "uploading" | "processing" | "done" | "error";
+
+interface ConvertResult {
+  title: string;
+  downloadUrl: string;
+  emailed: boolean;
+  emailError?: string;
+}
 
 export default function Home() {
   const [status, setStatus] = React.useState<Status>("idle");
-  const [fileName, setFileName] = React.useState<string>("");
-  const [error, setError] = React.useState<string>("");
+  const [fileName, setFileName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [result, setResult] = React.useState<ConvertResult | null>(null);
 
   async function handleFile(file: File) {
     setFileName(file.name);
     setError("");
-    setStatus("processing");
+    setResult(null);
 
     try {
-      const body = new FormData();
-      body.append("file", file);
+      // 1. Upload straight to Blob (skips the 4.5 MB serverless limit).
+      setStatus("uploading");
+      const blob = await upload(file.name, file, {
+        access: "public",
+        handleUploadUrl: "/api/upload",
+        contentType: file.type || "application/octet-stream",
+      });
 
-      const res = await fetch("/api/convert", { method: "POST", body });
+      // 2. Convert (extract → translate → build → store → email).
+      setStatus("processing");
+      const res = await fetch("/api/convert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: blob.url,
+          filename: file.name,
+          email: email.trim() || undefined,
+        }),
+      });
 
       if (!res.ok) {
-        let message = "Algo salió mal al convertir el PDF.";
+        let message = "Algo salió mal al convertir el archivo.";
         try {
           const data = await res.json();
           if (data?.error) message = data.error;
         } catch {
-          // non-JSON error body; keep default message
+          // keep default
         }
         setError(message);
         setStatus("error");
         return;
       }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.name.replace(/\.pdf$/i, "") + ".epub";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
+      const data: ConvertResult = await res.json();
+      setResult(data);
       setStatus("done");
-    } catch {
-      setError("No se pudo conectar con el servidor.");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No se pudo conectar con el servidor.",
+      );
       setStatus("error");
     }
   }
@@ -70,7 +89,10 @@ export default function Home() {
     setStatus("idle");
     setFileName("");
     setError("");
+    setResult(null);
   }
+
+  const busy = status === "uploading" || status === "processing";
 
   return (
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-12">
@@ -84,17 +106,36 @@ export default function Home() {
         </CardHeader>
         <CardContent className="space-y-4">
           {status === "idle" && (
-            <Dropzone onFile={handleFile} onReject={handleReject} />
+            <>
+              <label className="block space-y-1.5">
+                <span className="text-sm font-medium">
+                  Email (opcional) — te mandamos el ePub
+                </span>
+                <input
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="vos@ejemplo.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
+                />
+              </label>
+              <Dropzone onFile={handleFile} onReject={handleReject} />
+            </>
           )}
 
-          {status === "processing" && (
+          {busy && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-14 text-center">
               <Loader2 className="size-8 animate-spin text-[var(--muted-foreground)]" />
               <div className="space-y-1">
-                <p className="text-sm font-medium">Procesando…</p>
+                <p className="text-sm font-medium">
+                  {status === "uploading" ? "Subiendo…" : "Procesando…"}
+                </p>
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Extrayendo el texto, traduciendo y armando el ePub. Esto puede
-                  tardar según el tamaño del PDF.
+                  {status === "uploading"
+                    ? "Subiendo el archivo."
+                    : "Extrayendo el texto, traduciendo y armando el ePub. Puede tardar según el tamaño."}
                 </p>
                 <p className="truncate text-xs text-[var(--muted-foreground)]">
                   {fileName}
@@ -103,17 +144,30 @@ export default function Home() {
             </div>
           )}
 
-          {status === "done" && (
-            <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-14 text-center">
+          {status === "done" && result && (
+            <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-12 text-center">
               <CheckCircle2 className="size-8 text-green-600" />
               <div className="space-y-1">
                 <p className="text-sm font-medium">¡Listo!</p>
-                <p className="text-xs text-[var(--muted-foreground)]">
-                  La descarga del .epub debería haber empezado.
-                </p>
+                {result.emailed && (
+                  <p className="flex items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+                    <Mail className="size-3.5" /> Te lo enviamos por email.
+                  </p>
+                )}
+                {!result.emailed && result.emailError && (
+                  <p className="text-xs text-amber-600">
+                    No se pudo enviar el email ({result.emailError}). Usá la
+                    descarga.
+                  </p>
+                )}
               </div>
+              <a href={result.downloadUrl} download>
+                <Button size="sm">
+                  <FileDown className="size-4" /> Descargar .epub
+                </Button>
+              </a>
               <Button onClick={reset} variant="outline" size="sm">
-                <FileDown className="size-4" /> Convertir otro
+                Convertir otro
               </Button>
             </div>
           )}

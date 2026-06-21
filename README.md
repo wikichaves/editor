@@ -41,22 +41,37 @@ Abrí http://localhost:3000.
 
 ### Variables de entorno
 
-| Variable            | Descripción                                                  |
-| ------------------- | ------------------------------------------------------------ |
-| `ANTHROPIC_API_KEY` | API key de Anthropic. Conseguila en https://console.anthropic.com/ |
+| Variable                | Requerida | Descripción                                                       |
+| ----------------------- | --------- | ----------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`     | sí        | API key de Anthropic. https://console.anthropic.com/              |
+| `BLOB_READ_WRITE_TOKEN` | sí        | Token de Vercel Blob. Se auto-setea al conectar un Blob store.    |
+| `RESEND_API_KEY`        | no        | Solo si querés enviar el ePub por email. https://resend.com/      |
+| `EMAIL_FROM`            | no        | Remitente. Sin dominio verificado, Resend solo entrega al dueño de la cuenta. |
 
-Sin esta variable, la traducción falla en runtime (el endpoint devuelve 500).
+Sin `ANTHROPIC_API_KEY` la traducción falla (500). Sin `BLOB_READ_WRITE_TOKEN`
+fallan la subida y el guardado del resultado.
+
+### Por qué Vercel Blob
+
+Las funciones serverless de Vercel limitan el cuerpo del request a **4.5 MB**.
+Para soportar libros más grandes, el navegador sube el archivo **directo a
+Blob** (`/api/upload` emite el token) y `/api/convert` lo procesa desde la URL
+del blob. El ePub resultante también se guarda en Blob para tener una URL de
+descarga estable (útil en celular, donde la descarga vía JS suele fallar).
 
 ## Deploy en Vercel
 
 1. Subí el repo a GitHub (privado).
 2. En Vercel: **Add New… → Project → Import** el repo.
 3. Framework: Next.js (autodetectado). No hace falta tocar build settings.
-4. **⚠️ Importante:** en **Settings → Environment Variables** agregá
-   `ANTHROPIC_API_KEY` con tu key, para los entornos Production (y Preview si
-   querés). **Si no la seteás, el deploy compila pero falla en runtime** cuando
-   intentás convertir un PDF.
-5. Deploy.
+4. **Conectá un Blob store:** en **Storage → Create → Blob**, conectalo al
+   proyecto. Eso agrega `BLOB_READ_WRITE_TOKEN` automáticamente.
+5. **⚠️ Variables de entorno** (**Settings → Environment Variables**, Production):
+   - `ANTHROPIC_API_KEY` (obligatoria; sin ella el deploy compila pero falla al convertir).
+   - `RESEND_API_KEY` (opcional, para email). Tip: registrate en Resend con la
+     casilla a la que querés que lleguen los envíos; así el remitente de prueba
+     `onboarding@resend.dev` puede entregarte sin verificar un dominio.
+6. Deploy.
 
 ### Sobre el límite de tiempo
 
