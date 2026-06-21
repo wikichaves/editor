@@ -37,27 +37,41 @@ export default function Home() {
     setProgress(0);
 
     try {
-      // 1. Upload straight to Blob (skips the 4.5 MB serverless limit).
-      setStatus("uploading");
-      const blob = await upload(file.name, file, {
-        access: "public",
-        handleUploadUrl: "/api/upload",
-        contentType: file.type || "application/octet-stream",
-        multipart: true, // split into parts + retry — helps on slow connections
-        onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
-      });
+      // Under Vercel's 4.5 MB request limit we POST the file directly — no Blob
+      // hop (more reliable, especially on flaky connections). Larger files go
+      // through Blob to bypass that limit.
+      const DIRECT_LIMIT = 4 * 1024 * 1024;
+      let res: Response;
 
-      // 2. Convert (extract → translate → build → store → email).
-      setStatus("processing");
-      const res = await fetch("/api/convert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          blobUrl: blob.url,
-          filename: file.name,
-          email: email.trim() || undefined,
-        }),
-      });
+      if (file.size <= DIRECT_LIMIT) {
+        setStatus("processing");
+        const fd = new FormData();
+        fd.append("file", file);
+        if (email.trim()) fd.append("email", email.trim());
+        res = await fetch("/api/convert", { method: "POST", body: fd });
+      } else {
+        // 1. Upload straight to Blob (skips the request-body limit).
+        setStatus("uploading");
+        const blob = await upload(file.name, file, {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          contentType: file.type || "application/octet-stream",
+          multipart: true, // parts + retry — helps on slow connections
+          onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
+        });
+
+        // 2. Convert from the blob URL.
+        setStatus("processing");
+        res = await fetch("/api/convert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            blobUrl: blob.url,
+            filename: file.name,
+            email: email.trim() || undefined,
+          }),
+        });
+      }
 
       if (!res.ok) {
         let message = "Algo salió mal al convertir el archivo.";
