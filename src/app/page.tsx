@@ -60,6 +60,12 @@ export default function Home() {
     }
   }
 
+  function handleReject(message: string) {
+    setFileName("");
+    setError(message);
+    setStatus("error");
+  }
+
   function reset() {
     setStatus("idle");
     setFileName("");
@@ -77,7 +83,9 @@ export default function Home() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {status === "idle" && <Dropzone onFile={handleFile} />}
+          {status === "idle" && (
+            <Dropzone onFile={handleFile} onReject={handleReject} />
+          )}
 
           {status === "processing" && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-14 text-center">

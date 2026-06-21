@@ -6,16 +6,22 @@ import { cn } from "@/lib/utils";
 
 interface DropzoneProps {
   onFile: (file: File) => void;
+  onReject?: (message: string) => void;
   disabled?: boolean;
 }
 
-export function Dropzone({ onFile, disabled }: DropzoneProps) {
+export function Dropzone({ onFile, onReject, disabled }: DropzoneProps) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = React.useState(false);
 
   function pick(file: File | undefined | null) {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".pdf")) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      onReject?.(
+        `"${file.name}" no es un PDF. Subí un archivo .pdf con texto (no escaneado).`,
+      );
+      return;
+    }
     onFile(file);
   }
 
