@@ -28,14 +28,16 @@ export async function ocrTranslatePdf(
     );
   }
 
+  // Encode to base64 BEFORE any pdf.js call: getDocumentProxy detaches the
+  // underlying ArrayBuffer, which would corrupt a later read.
+  const base64 = Buffer.from(pdf).toString("base64");
+
   const proxy = await getDocumentProxy(pdf);
   if (proxy.numPages > OCR_MAX_PAGES) {
     throw new Error(
       `El PDF escaneado tiene ${proxy.numPages} páginas; el OCR admite hasta ${OCR_MAX_PAGES}. Dividilo y probá por partes.`,
     );
   }
-
-  const base64 = Buffer.from(pdf).toString("base64");
 
   const message = await client.messages.create({
     model: TRANSLATION_MODEL,

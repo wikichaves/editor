@@ -26,7 +26,9 @@ async function buildSpanishEpub(
   const kind = detectKind(data);
   if (!kind) throw new Error("Formato no reconocido. Subí un PDF, EPUB o AZW3.");
 
-  const fullText = (await extractBookText(data)).trim();
+  // Extract from a COPY: pdf.js detaches the buffer it reads, and we still need
+  // the original bytes if we fall back to OCR.
+  const fullText = (await extractBookText(data.slice())).trim();
   const needsOcr = kind === "pdf" && fullText.length < 30; // scanned PDF
 
   if (!fullText && !needsOcr) {
