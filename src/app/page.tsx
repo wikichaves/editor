@@ -38,12 +38,20 @@ export default function Home() {
 
     try {
       const wantsEmail = email.trim().length > 0;
+      // Files under Vercel's 4.5 MB request limit POST directly to the function
+      // — no Blob hop (the client→Blob upload proved unreliable). The server
+      // still processes in the background and emails the result when an email
+      // is given. Only larger files go through Blob (to bypass the limit).
+      const DIRECT_LIMIT = 4 * 1024 * 1024;
       let res: Response;
 
-      if (wantsEmail) {
-        // Email path: upload to Blob (multipart = retries, survives flaky
-        // connections), then kick off a background job that emails the result.
-        // The browser never has to stay connected during the long conversion.
+      if (file.size <= DIRECT_LIMIT) {
+        setStatus("processing");
+        const fd = new FormData();
+        fd.append("file", file);
+        if (wantsEmail) fd.append("email", email.trim());
+        res = await fetch("/api/convert", { method: "POST", body: fd });
+      } else {
         setStatus("uploading");
         const blob = await upload(file.name, file, {
           access: "public",
@@ -52,7 +60,6 @@ export default function Home() {
           multipart: true,
           onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
         });
-
         setStatus("processing");
         res = await fetch("/api/convert", {
           method: "POST",
@@ -60,34 +67,9 @@ export default function Home() {
           body: JSON.stringify({
             blobUrl: blob.url,
             filename: file.name,
-            email: email.trim(),
+            email: wantsEmail ? email.trim() : undefined,
           }),
         });
-      } else {
-        // No email → synchronous inline download. Small files go straight to
-        // the function; larger ones via Blob to bypass the request-body limit.
-        const DIRECT_LIMIT = 4 * 1024 * 1024;
-        if (file.size <= DIRECT_LIMIT) {
-          setStatus("processing");
-          const fd = new FormData();
-          fd.append("file", file);
-          res = await fetch("/api/convert", { method: "POST", body: fd });
-        } else {
-          setStatus("uploading");
-          const blob = await upload(file.name, file, {
-            access: "public",
-            handleUploadUrl: "/api/upload",
-            contentType: file.type || "application/octet-stream",
-            multipart: true,
-            onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
-          });
-          setStatus("processing");
-          res = await fetch("/api/convert", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ blobUrl: blob.url, filename: file.name }),
-          });
-        }
       }
 
       if (!res.ok) {
