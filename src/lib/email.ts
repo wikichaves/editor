@@ -17,7 +17,7 @@ export async function emailEpub(opts: {
   if (!apiKey) throw new Error("Falta RESEND_API_KEY en el servidor.");
 
   const resend = new Resend(apiKey);
-  const from = process.env.EMAIL_FROM || "Tero ePub <onboarding@resend.dev>";
+  const from = process.env.EMAIL_FROM || "Wiki Editor <onboarding@resend.dev>";
 
   const { error } = await resend.emails.send({
     from,
@@ -43,7 +43,7 @@ export async function emailFailure(to: string, detail: string): Promise<void> {
   if (!apiKey) return;
 
   const resend = new Resend(apiKey);
-  const from = process.env.EMAIL_FROM || "Tero ePub <onboarding@resend.dev>";
+  const from = process.env.EMAIL_FROM || "Wiki Editor <onboarding@resend.dev>";
 
   await resend.emails.send({
     from,
