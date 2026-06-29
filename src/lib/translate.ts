@@ -77,3 +77,30 @@ export async function translateText(
 
   return translated.join("\n\n");
 }
+
+/**
+ * Translate a book title EN→ES. Returns only the translated title. Falls back
+ * to the input if the model returns nothing.
+ */
+export async function translateTitle(
+  client: Anthropic,
+  title: string,
+): Promise<string> {
+  if (!title.trim()) return title;
+
+  const message = await client.messages.create({
+    model: TRANSLATION_MODEL,
+    max_tokens: 200,
+    system:
+      "Traducí el título de libro del inglés al español. Devolvé SOLO el título traducido, sin comillas, sin explicaciones ni texto extra. Si ya está en español o es un nombre propio, devolvelo tal cual.",
+    messages: [{ role: "user", content: title }],
+  });
+
+  const out = message.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+
+  return out || title;
+}

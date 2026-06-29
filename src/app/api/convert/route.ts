@@ -2,7 +2,7 @@ import { NextRequest, NextResponse, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { put } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
-import { translateText } from "@/lib/translate";
+import { translateText, translateTitle } from "@/lib/translate";
 import { ocrTranslatePdf } from "@/lib/ocr";
 import { buildEpub } from "@/lib/epub";
 import { emailEpub, emailFailure } from "@/lib/email";
@@ -42,9 +42,36 @@ async function buildSpanishEpub(
     ? await ocrTranslatePdf(client, data)
     : await translateText(client, fullText);
 
-  const title = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
+  // Clean the file-name-derived title (strip download-mirror junk) and translate it.
+  const rawTitle = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
+  const cleaned = cleanTitle(rawTitle) || "Libro";
+  let title = cleaned;
+  try {
+    title = await translateTitle(client, cleaned);
+  } catch {
+    title = cleaned; // keep the cleaned English title if translation fails
+  }
+
   const epub = await buildEpub(title, spanish);
   return { title, epub };
+}
+
+/** Strip download-site junk (z-library, 1lib, libgen…) and tidy a raw title. */
+function cleanTitle(raw: string): string {
+  return raw
+    // Parenthesised/bracketed groups that mention a known mirror.
+    .replace(
+      /[([{][^)\]}]*(?:z-?lib|1lib|library|libgen|anna|archive|pdfdrive|epubs?)[^)\]}]*[)\]}]/gi,
+      "",
+    )
+    // Loose mirror domains/tokens, e.g. "z-library.sk", "1lib.sk".
+    .replace(/\b(?:z-?library|z-?lib|1lib|libgen|pdfdrive)(?:\.\w+)?\b/gi, "")
+    // Underscores → spaces (common in downloaded filenames).
+    .replace(/_+/g, " ")
+    // Tidy whitespace and stray edge punctuation.
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[\s,;:.\-–—]+|[\s,;:.\-–—]+$/g, "")
+    .trim();
 }
 
 export async function POST(req: NextRequest) {
