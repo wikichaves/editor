@@ -22,8 +22,8 @@ export async function emailEpub(opts: {
   const { error } = await resend.emails.send({
     from,
     to: opts.to,
-    subject: `Tu ePub en español: ${opts.title}`,
-    text: `Adjuntamos "${opts.title}.epub", traducido al español.\n\nGenerado automáticamente (EN→ES).`,
+    subject: `Tu ePub: ${opts.title}`,
+    text: `Adjuntamos "${opts.title}.epub".\n\nGenerado automáticamente.`,
     attachments: [
       {
         filename: `${opts.title}.epub`,

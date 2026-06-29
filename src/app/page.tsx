@@ -28,6 +28,8 @@ export default function Home() {
   const [error, setError] = React.useState("");
   const [progress, setProgress] = React.useState(0);
   const [result, setResult] = React.useState<ConvertResult | null>(null);
+  const [translate, setTranslate] = React.useState(true);
+  const [summarize, setSummarize] = React.useState(false);
 
   async function handleFile(file: File) {
     setFileName(file.name);
@@ -48,6 +50,8 @@ export default function Home() {
         const fd = new FormData();
         fd.append("file", file);
         if (wantsEmail) fd.append("email", email.trim());
+        fd.append("translate", String(translate));
+        fd.append("summarize", String(summarize));
         res = await fetch("/api/convert", { method: "POST", body: fd });
       } else {
         setStatus("uploading");
@@ -70,6 +74,8 @@ export default function Home() {
             uploadId,
             filename: file.name,
             email: wantsEmail ? email.trim() : undefined,
+            translate,
+            summarize,
           }),
         });
       }
@@ -133,10 +139,11 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle>PDF · EPUB · AZW3 → ePub en español</CardTitle>
+          <CardTitle>PDF · EPUB · AZW3 → ePub</CardTitle>
           <CardDescription>
-            Subí un PDF (incluso escaneado), EPUB o AZW3 en inglés y descargá un
-            ePub traducido al español. La salida no incluye imágenes.
+            Subí un PDF (incluso escaneado), EPUB o AZW3 y descargá un ePub.
+            Opcionalmente lo traducimos al español y/o lo resumimos. La salida no
+            incluye imágenes.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -160,6 +167,40 @@ export default function Home() {
                   className="w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
                 />
               </label>
+
+              <div className="space-y-2 rounded-lg border border-[var(--border)] px-3 py-3">
+                <label className="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={translate}
+                    onChange={(e) => setTranslate(e.target.checked)}
+                    className="mt-0.5 size-4"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">
+                      Traducir al español
+                    </span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">
+                      Si lo destildás, el ePub queda en el idioma original.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={summarize}
+                    onChange={(e) => setSummarize(e.target.checked)}
+                    className="mt-0.5 size-4"
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">Resumir</span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">
+                      Acorta el contenido a la mitad (~50%), conservando lo esencial.
+                    </span>
+                  </span>
+                </label>
+              </div>
+
               <Dropzone onFile={handleFile} onReject={handleReject} />
             </>
           )}

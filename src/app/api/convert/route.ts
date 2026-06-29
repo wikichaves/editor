@@ -2,8 +2,8 @@ import { NextRequest, NextResponse, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { list, del, get } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
-import { translateText, translateTitle } from "@/lib/translate";
-import { ocrTranslatePdf } from "@/lib/ocr";
+import { transformText, translateTitle, type TransformOpts } from "@/lib/translate";
+import { ocrPdf } from "@/lib/ocr";
 import { extractPdfCover } from "@/lib/cover";
 import { buildEpub } from "@/lib/epub";
 import { emailEpub, emailFailure } from "@/lib/email";
@@ -18,6 +18,8 @@ interface ConvertBody {
   uploadId?: string;
   filename?: string;
   email?: string;
+  translate?: boolean;
+  summarize?: boolean;
 }
 
 /** Fetch all chunks of an upload from Blob and concatenate them in order. */
@@ -47,10 +49,11 @@ async function assembleChunks(
   return { data, urls: blobs.map((b) => b.url) };
 }
 
-/** Extract/OCR → translate → build the Spanish ePub. Throws user-facing errors. */
-async function buildSpanishEpub(
+/** Extract/OCR → (optionally translate/summarize) → build the ePub. */
+async function buildEpubJob(
   data: Uint8Array,
   filename: string | undefined,
+  opts: TransformOpts,
 ): Promise<{ title: string; epub: Buffer }> {
   const kind = detectKind(data);
   if (!kind) throw new Error("Formato no reconocido. Subí un PDF, EPUB o AZW3.");
@@ -70,18 +73,21 @@ async function buildSpanishEpub(
   }
 
   const client = new Anthropic();
-  const spanish = needsOcr
-    ? await ocrTranslatePdf(client, data)
-    : await translateText(client, fullText);
+  // Scanned PDFs always need Claude to read them (OCR); text files only call
+  // the model when translating and/or summarizing.
+  const body = needsOcr
+    ? await ocrPdf(client, data, opts)
+    : await transformText(client, fullText, opts);
 
-  // Clean the file-name-derived title (strip download-mirror junk) and translate it.
+  // Clean the file-name-derived title; translate it only when translating.
   const rawTitle = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
-  const cleaned = cleanTitle(rawTitle) || "Libro";
-  let title = cleaned;
-  try {
-    title = await translateTitle(client, cleaned);
-  } catch {
-    title = cleaned; // keep the cleaned English title if translation fails
+  let title = cleanTitle(rawTitle) || "Libro";
+  if (opts.translate) {
+    try {
+      title = await translateTitle(client, title);
+    } catch {
+      // keep the cleaned original title if translation fails
+    }
   }
 
   // Best-effort cover for PDFs: most prominent image, grayscaled for e-readers.
@@ -94,7 +100,7 @@ async function buildSpanishEpub(
     }
   }
 
-  const epub = await buildEpub(title, spanish, cover);
+  const epub = await buildEpub(title, body, cover);
   return { title, epub };
 }
 
@@ -131,6 +137,8 @@ export async function POST(req: NextRequest) {
   let filename: string | undefined;
   let email: string | undefined;
   let chunkUrls: string[] = [];
+  // Defaults: translate on, summarize off.
+  let opts: TransformOpts = { translate: true, summarize: false };
 
   if (contentType.includes("application/json")) {
     let body: ConvertBody;
@@ -141,6 +149,7 @@ export async function POST(req: NextRequest) {
     }
     filename = body.filename;
     email = body.email;
+    opts = { translate: body.translate !== false, summarize: body.summarize === true };
 
     if (body.uploadId) {
       try {
@@ -187,6 +196,10 @@ export async function POST(req: NextRequest) {
     filename = file.name;
     const e = form.get("email");
     email = typeof e === "string" ? e : undefined;
+    opts = {
+      translate: form.get("translate") !== "false",
+      summarize: form.get("summarize") === "true",
+    };
     data = new Uint8Array(await file.arrayBuffer());
   }
 
@@ -211,7 +224,7 @@ export async function POST(req: NextRequest) {
     }
     after(async () => {
       try {
-        const { title, epub } = await buildSpanishEpub(data, filename);
+        const { title, epub } = await buildEpubJob(data, filename, opts);
         await emailEpub({ to, title, epub });
       } catch (err) {
         const message =
@@ -227,7 +240,7 @@ export async function POST(req: NextRequest) {
   // --- Sync path (no email): process now and return a download URL. ---
   let result: { title: string; epub: Buffer };
   try {
-    result = await buildSpanishEpub(data, filename);
+    result = await buildEpubJob(data, filename, opts);
   } catch (err) {
     if (chunkUrls.length) await del(chunkUrls).catch(() => {});
     const message =

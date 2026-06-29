@@ -78,6 +78,54 @@ export async function translateText(
   return translated.join("\n\n");
 }
 
+export interface TransformOpts {
+  translate: boolean;
+  summarize: boolean;
+}
+
+function systemPromptFor({ translate, summarize }: TransformOpts): string {
+  if (translate && summarize) {
+    return "You are a professional literary translator and editor. Translate the text from English to Spanish AND condense it to roughly half its length, keeping the key content, names, and narrative flow. Preserve paragraph breaks. Do not add notes, explanations, or markdown. Output only the resulting Spanish text.";
+  }
+  if (translate) return SYSTEM_PROMPT;
+  if (summarize) {
+    return "You are a skilled editor. Condense the text to roughly half its length, in its ORIGINAL language, keeping the key content, names, and narrative flow. Preserve paragraph breaks. Do not add notes, explanations, or markdown. Output only the condensed text.";
+  }
+  return "";
+}
+
+/**
+ * Transform the text per the chosen options: translate EN→ES and/or condense to
+ * ~50%. When neither is selected, the text is returned unchanged (no LLM call).
+ */
+export async function transformText(
+  client: Anthropic,
+  fullText: string,
+  opts: TransformOpts,
+): Promise<string> {
+  if (!opts.translate && !opts.summarize) return fullText;
+
+  const system = systemPromptFor(opts);
+  const chunks = chunkText(fullText);
+  const out: string[] = [];
+
+  for (const chunk of chunks) {
+    const message = await client.messages.create({
+      model: TRANSLATION_MODEL,
+      max_tokens: 8192,
+      system,
+      messages: [{ role: "user", content: chunk }],
+    });
+    const text = message.content
+      .filter((block): block is Anthropic.TextBlock => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    out.push(text.trim());
+  }
+
+  return out.join("\n\n");
+}
+
 /**
  * Translate a book title EN→ES. Returns only the translated title. Falls back
  * to the input if the model returns nothing.

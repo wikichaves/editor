@@ -86,7 +86,7 @@ export async function buildEpub(
 
   const options: Parameters<typeof epub>[0] = {
     title,
-    author: "Traducción automática (EN→ES)",
+    author: "Generado automáticamente",
   };
   if (coverImage) {
     options.cover = new File([new Uint8Array(coverImage)], "cover.jpg", {

@@ -1,26 +1,33 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import { getDocumentProxy } from "unpdf";
-import { TRANSLATION_MODEL } from "./translate";
+import { TRANSLATION_MODEL, type TransformOpts } from "./translate";
 
 // Anthropic's native PDF support handles up to 100 pages / 32 MB per request.
 export const OCR_MAX_PAGES = 100;
 export const OCR_MAX_BYTES = 30 * 1024 * 1024;
 
-const OCR_PROMPT =
-  "Este PDF está escaneado (sin capa de texto). Transcribí TODO su texto en " +
-  "orden de lectura y traducilo a un español natural y fluido. Respetá los " +
-  "saltos de párrafo. Si una página no tiene texto, omitila. No agregues notas, " +
-  "números de página ni comentarios: devolvé ÚNICAMENTE la traducción al español.";
+function ocrPromptFor({ translate, summarize }: TransformOpts): string {
+  let p =
+    "Este PDF está escaneado (sin capa de texto). Transcribí TODO su texto en orden de lectura";
+  if (translate) p += ", traducido a un español natural y fluido";
+  if (summarize) {
+    p += `${translate ? " y" : ","} resumido a aproximadamente la mitad de su longitud (conservando lo esencial, nombres y el hilo de la historia)`;
+  }
+  p +=
+    ". Respetá los saltos de párrafo. Si una página no tiene texto, omitila. No agregues notas, números de página ni comentarios: devolvé ÚNICAMENTE el texto resultante.";
+  return p;
+}
 
 /**
- * OCR + translate a scanned PDF in one step using Claude's native PDF support.
- * Claude reads the document (including page images), so no rasterization is
- * needed. Returns the Spanish text. Throws a user-facing error if the PDF is
- * too large or has too many pages for a single request.
+ * OCR a scanned PDF with Claude's native PDF support, optionally translating to
+ * Spanish and/or condensing to ~50%. Claude reads the document (including page
+ * images), so no rasterization is needed. Throws a user-facing error if the PDF
+ * is too large or has too many pages for a single request.
  */
-export async function ocrTranslatePdf(
+export async function ocrPdf(
   client: Anthropic,
   pdf: Uint8Array,
+  opts: TransformOpts,
 ): Promise<string> {
   if (pdf.byteLength > OCR_MAX_BYTES) {
     throw new Error(
@@ -54,7 +61,7 @@ export async function ocrTranslatePdf(
               data: base64,
             },
           },
-          { type: "text", text: OCR_PROMPT },
+          { type: "text", text: ocrPromptFor(opts) },
         ],
       },
     ],
