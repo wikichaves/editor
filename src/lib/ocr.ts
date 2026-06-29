@@ -1,10 +1,15 @@
 import type Anthropic from "@anthropic-ai/sdk";
-import { getDocumentProxy } from "unpdf";
+import { PDFDocument } from "pdf-lib";
 import { TRANSLATION_MODEL, type TransformOpts } from "./translate";
 
 // Anthropic's native PDF support handles up to 100 pages / 32 MB per request.
 export const OCR_MAX_PAGES = 100;
 export const OCR_MAX_BYTES = 30 * 1024 * 1024;
+
+// Split big scanned PDFs into page batches and OCR them in parallel so each
+// Claude call stays fast and the whole job fits in the function time limit.
+const PAGES_PER_BATCH = 12;
+const OCR_CONCURRENCY = 4;
 
 function ocrPromptFor({ translate, summarize }: TransformOpts): string {
   let p =
@@ -18,11 +23,58 @@ function ocrPromptFor({ translate, summarize }: TransformOpts): string {
   return p;
 }
 
+/** Send one PDF (base64) to Claude and return the extracted text. */
+async function ocrOne(
+  client: Anthropic,
+  base64: string,
+  prompt: string,
+): Promise<string> {
+  const message = await client.messages.create({
+    model: TRANSLATION_MODEL,
+    max_tokens: 16000,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: base64 },
+          },
+          { type: "text", text: prompt },
+        ],
+      },
+    ],
+  });
+  return message.content
+    .filter((block): block is Anthropic.TextBlock => block.type === "text")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+}
+
+/** Run `fn` over items with a concurrency cap, preserving order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /**
  * OCR a scanned PDF with Claude's native PDF support, optionally translating to
- * Spanish and/or condensing to ~50%. Claude reads the document (including page
- * images), so no rasterization is needed. Throws a user-facing error if the PDF
- * is too large or has too many pages for a single request.
+ * Spanish and/or condensing. Large PDFs are split into page batches OCR'd in
+ * parallel so the job stays within the function time limit. No rasterization.
  */
 export async function ocrPdf(
   client: Anthropic,
@@ -35,43 +87,46 @@ export async function ocrPdf(
     );
   }
 
-  // Encode to base64 BEFORE any pdf.js call: getDocumentProxy detaches the
-  // underlying ArrayBuffer, which would corrupt a later read.
-  const base64 = Buffer.from(pdf).toString("base64");
+  const prompt = ocrPromptFor(opts);
 
-  const proxy = await getDocumentProxy(pdf);
-  if (proxy.numPages > OCR_MAX_PAGES) {
+  // Load with pdf-lib (does not detach the input) to count and split pages.
+  const src = await PDFDocument.load(pdf);
+  const numPages = src.getPageCount();
+  if (numPages > OCR_MAX_PAGES) {
     throw new Error(
-      `El PDF escaneado tiene ${proxy.numPages} páginas; el OCR admite hasta ${OCR_MAX_PAGES}. Dividilo y probá por partes.`,
+      `El PDF escaneado tiene ${numPages} páginas; el OCR admite hasta ${OCR_MAX_PAGES}. Dividilo y probá por partes.`,
     );
   }
 
-  const message = await client.messages.create({
-    model: TRANSLATION_MODEL,
-    max_tokens: 16000,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: {
-              type: "base64",
-              media_type: "application/pdf",
-              data: base64,
-            },
-          },
-          { type: "text", text: ocrPromptFor(opts) },
-        ],
-      },
-    ],
-  });
+  let text: string;
+  if (numPages <= PAGES_PER_BATCH) {
+    console.log(`ocr: single call, ${numPages} pages`);
+    text = await ocrOne(client, Buffer.from(pdf).toString("base64"), prompt);
+  } else {
+    // Build one sub-PDF per page batch.
+    const ranges: [number, number][] = [];
+    for (let s = 0; s < numPages; s += PAGES_PER_BATCH) {
+      ranges.push([s, Math.min(s + PAGES_PER_BATCH, numPages)]);
+    }
+    console.log(`ocr: ${numPages} pages → ${ranges.length} batches of ${PAGES_PER_BATCH}`);
 
-  const text = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
+    const batchesB64: string[] = [];
+    for (const [start, end] of ranges) {
+      const doc = await PDFDocument.create();
+      const pages = await doc.copyPages(
+        src,
+        Array.from({ length: end - start }, (_, k) => start + k),
+      );
+      pages.forEach((p) => doc.addPage(p));
+      const bytes = await doc.save();
+      batchesB64.push(Buffer.from(bytes).toString("base64"));
+    }
+
+    const parts = await mapLimit(batchesB64, OCR_CONCURRENCY, (b) =>
+      ocrOne(client, b, prompt),
+    );
+    text = parts.join("\n\n");
+  }
 
   if (!text) {
     throw new Error("No se pudo extraer texto del PDF escaneado (OCR vacío).");

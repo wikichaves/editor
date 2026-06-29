@@ -75,9 +75,14 @@ async function buildEpubJob(
   const client = new Anthropic();
   // Scanned PDFs always need Claude to read them (OCR); text files only call
   // the model when translating and/or summarizing.
+  const t0 = Date.now();
+  console.log(
+    `job: kind=${kind} needsOcr=${needsOcr} textLen=${fullText.length} translate=${opts.translate} summarize=${opts.summarize}`,
+  );
   const body = needsOcr
     ? await ocrPdf(client, data, opts)
     : await transformText(client, fullText, opts);
+  console.log(`job: transform done in ${Math.round((Date.now() - t0) / 1000)}s, outLen=${body.length}`);
 
   // Clean the file-name-derived title; translate it only when translating.
   const rawTitle = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
