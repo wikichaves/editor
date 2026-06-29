@@ -4,6 +4,7 @@ import { put } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
 import { translateText, translateTitle } from "@/lib/translate";
 import { ocrTranslatePdf } from "@/lib/ocr";
+import { extractPdfCover } from "@/lib/cover";
 import { buildEpub } from "@/lib/epub";
 import { emailEpub, emailFailure } from "@/lib/email";
 
@@ -25,6 +26,9 @@ async function buildSpanishEpub(
 ): Promise<{ title: string; epub: Buffer }> {
   const kind = detectKind(data);
   if (!kind) throw new Error("Formato no reconocido. Subí un PDF, EPUB o AZW3.");
+
+  // Keep a copy for cover extraction before pdf.js detaches the buffer.
+  const coverSource = kind === "pdf" ? data.slice() : null;
 
   // Extract from a COPY: pdf.js detaches the buffer it reads, and we still need
   // the original bytes if we fall back to OCR.
@@ -52,7 +56,17 @@ async function buildSpanishEpub(
     title = cleaned; // keep the cleaned English title if translation fails
   }
 
-  const epub = await buildEpub(title, spanish);
+  // Best-effort cover for PDFs: most prominent image, grayscaled for e-readers.
+  let cover: Buffer | undefined;
+  if (coverSource) {
+    try {
+      cover = (await extractPdfCover(coverSource)) ?? undefined;
+    } catch {
+      cover = undefined;
+    }
+  }
+
+  const epub = await buildEpub(title, spanish, cover);
   return { title, epub };
 }
 

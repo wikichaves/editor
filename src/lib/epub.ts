@@ -69,21 +69,31 @@ function splitIntoChapters(bookTitle: string, text: string): Chapter[] {
 }
 
 /**
- * Build an ePub in memory from translated Spanish text. No images. Detects
- * chapters for a navigable TOC. Returns a Buffer (never touches disk — key for
- * serverless).
+ * Build an ePub in memory from translated Spanish text. Detects chapters for a
+ * navigable TOC and, when provided, sets a cover image. Returns a Buffer
+ * (never touches disk — key for serverless).
  */
-export async function buildEpub(title: string, spanishText: string): Promise<Buffer> {
+export async function buildEpub(
+  title: string,
+  spanishText: string,
+  coverImage?: Buffer,
+): Promise<Buffer> {
   const chapters = splitIntoChapters(title, spanishText);
   const content = chapters.map((c) => ({
     title: c.title,
     content: c.body || "<p></p>",
   }));
 
-  const buffer = await epub(
-    { title, author: "Traducción automática (EN→ES)" },
-    content,
-  );
+  const options: Parameters<typeof epub>[0] = {
+    title,
+    author: "Traducción automática (EN→ES)",
+  };
+  if (coverImage) {
+    options.cover = new File([new Uint8Array(coverImage)], "cover.jpg", {
+      type: "image/jpeg",
+    });
+  }
 
+  const buffer = await epub(options, content);
   return buffer;
 }

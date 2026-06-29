@@ -1,8 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // unpdf and epub-gen-memory run only in the Node.js runtime route handler.
-  // Nothing special needed here, but keep this file as the project's config anchor.
+  // sharp ships a native binary — keep it external so it isn't bundled by
+  // webpack and resolves correctly in the serverless function.
+  serverExternalPackages: ["sharp"],
 };
 
 export default nextConfig;
