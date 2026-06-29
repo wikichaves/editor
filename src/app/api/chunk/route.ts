@@ -32,9 +32,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       addRandomSuffix: false,
       allowOverwrite: true,
     });
-  } catch {
+  } catch (err) {
+    console.error("chunk put failed:", err);
+    const detail = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: "No se pudo guardar el fragmento subido." },
+      { error: `No se pudo guardar el fragmento: ${detail}` },
       { status: 502 },
     );
   }
