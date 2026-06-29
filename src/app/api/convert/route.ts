@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { put, list, del } from "@vercel/blob";
+import { list, del, get } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
 import { translateText, translateTitle } from "@/lib/translate";
 import { ocrTranslatePdf } from "@/lib/ocr";
@@ -30,9 +30,10 @@ async function assembleChunks(
 
   const parts: Uint8Array[] = [];
   for (const b of blobs) {
-    const res = await fetch(b.url);
-    if (!res.ok) throw new Error(String(res.status));
-    parts.push(new Uint8Array(await res.arrayBuffer()));
+    // Private store → read content server-side with get(), not a public URL.
+    const r = await get(b.pathname, { access: "private" });
+    if (!r || r.statusCode !== 200 || !r.stream) throw new Error("chunk read failed");
+    parts.push(new Uint8Array(await new Response(r.stream).arrayBuffer()));
   }
 
   let total = 0;
@@ -235,20 +236,12 @@ export async function POST(req: NextRequest) {
   }
   if (chunkUrls.length) await del(chunkUrls).catch(() => {});
 
-  let downloadUrl: string;
-  try {
-    const blob = await put(`epubs/${result.title}.epub`, result.epub, {
-      access: "public",
-      contentType: "application/epub+zip",
-      addRandomSuffix: true,
-    });
-    downloadUrl = blob.url;
-  } catch {
-    return NextResponse.json(
-      { error: "No se pudo guardar el ePub resultante." },
-      { status: 502 },
-    );
-  }
-
-  return NextResponse.json({ title: result.title, downloadUrl });
+  // Return the ePub bytes directly so the browser downloads it (no Blob).
+  return new NextResponse(new Uint8Array(result.epub), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/epub+zip",
+      "Content-Disposition": `attachment; filename="${encodeURIComponent(result.title)}.epub"`,
+    },
+  });
 }

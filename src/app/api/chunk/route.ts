@@ -25,9 +25,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // Zero-padded index so list() returns chunks in order.
+    // Zero-padded index so list() returns chunks in order. The store is
+    // private, so chunks are read back server-side with get().
     await put(`uploads/${id}/${String(index).padStart(5, "0")}`, buf, {
-      access: "public",
+      access: "private",
       contentType: "application/octet-stream",
       addRandomSuffix: false,
       allowOverwrite: true,

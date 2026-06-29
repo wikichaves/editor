@@ -87,8 +87,23 @@ export default function Home() {
         return;
       }
 
-      const data: ConvertResult = await res.json();
-      setResult(data);
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/epub+zip")) {
+        // Synchronous (no email): the ePub comes back in the response body.
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name.replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "") + ".epub";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setResult({ async: false });
+      } else {
+        const data: ConvertResult = await res.json();
+        setResult(data);
+      }
       setStatus("done");
     } catch (err) {
       setError(
