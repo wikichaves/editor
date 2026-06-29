@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { upload } from "@vercel/blob/client";
 import { Loader2, FileDown, CheckCircle2, AlertCircle, Mail } from "lucide-react";
 import { Dropzone } from "@/components/dropzone";
 import { Button } from "@/components/ui/button";
@@ -38,14 +37,13 @@ export default function Home() {
 
     try {
       const wantsEmail = email.trim().length > 0;
-      // Files under Vercel's 4.5 MB request limit POST directly to the function
-      // — no Blob hop (the client→Blob upload proved unreliable). The server
-      // still processes in the background and emails the result when an email
-      // is given. Only larger files go through Blob (to bypass the limit).
-      const DIRECT_LIMIT = 4 * 1024 * 1024;
+      // Small files (< 4.5 MB request limit) POST directly. Larger files are
+      // sent in chunks straight to the function (/api/chunk) — the only upload
+      // channel that proved reliable — then assembled server-side.
+      const CHUNK = 4 * 1024 * 1024;
       let res: Response;
 
-      if (file.size <= DIRECT_LIMIT) {
+      if (file.size <= CHUNK) {
         setStatus("processing");
         const fd = new FormData();
         fd.append("file", file);
@@ -53,18 +51,23 @@ export default function Home() {
         res = await fetch("/api/convert", { method: "POST", body: fd });
       } else {
         setStatus("uploading");
-        const blob = await upload(file.name, file, {
-          access: "public",
-          handleUploadUrl: "/api/upload",
-          contentType: file.type || "application/octet-stream",
-          onUploadProgress: (e) => setProgress(Math.round(e.percentage)),
-        });
+        const uploadId = crypto.randomUUID().replace(/-/g, "");
+        const total = Math.ceil(file.size / CHUNK);
+        for (let i = 0; i < total; i++) {
+          const part = file.slice(i * CHUNK, (i + 1) * CHUNK);
+          const r = await fetch(`/api/chunk?id=${uploadId}&i=${i}`, {
+            method: "POST",
+            body: part,
+          });
+          if (!r.ok) throw new Error("Falló la subida de un fragmento. Reintentá.");
+          setProgress(Math.round(((i + 1) / total) * 100));
+        }
         setStatus("processing");
         res = await fetch("/api/convert", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            blobUrl: blob.url,
+            uploadId,
             filename: file.name,
             email: wantsEmail ? email.trim() : undefined,
           }),
@@ -151,9 +154,11 @@ export default function Home() {
               <Loader2 className="size-8 animate-spin text-[var(--muted-foreground)]" />
               <div className="w-full space-y-1">
                 <p className="text-sm font-medium">
-                  {status === "uploading" ? `Subiendo… ${progress}%` : "Procesando…"}
+                  {status === "uploading" && progress < 100
+                    ? `Subiendo… ${progress}%`
+                    : "Procesando…"}
                 </p>
-                {status === "uploading" && (
+                {status === "uploading" && progress < 100 && (
                   <div className="mx-auto mt-2 h-2 w-full max-w-xs overflow-hidden rounded-full bg-[var(--muted)]">
                     <div
                       className="h-full rounded-full bg-[var(--primary)] transition-[width] duration-200"
@@ -162,8 +167,8 @@ export default function Home() {
                   </div>
                 )}
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  {status === "uploading"
-                    ? "Subiendo el archivo al almacenamiento."
+                  {status === "uploading" && progress < 100
+                    ? "Subiendo el archivo."
                     : "Extrayendo el texto, traduciendo y armando el ePub. Puede tardar según el tamaño."}
                 </p>
                 <p className="truncate text-xs text-[var(--muted-foreground)]">

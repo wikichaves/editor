@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { put } from "@vercel/blob";
+import { put, list, del } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
 import { translateText, translateTitle } from "@/lib/translate";
 import { ocrTranslatePdf } from "@/lib/ocr";
@@ -15,8 +15,35 @@ export const maxDuration = 300;
 
 interface ConvertBody {
   blobUrl?: string;
+  uploadId?: string;
   filename?: string;
   email?: string;
+}
+
+/** Fetch all chunks of an upload from Blob and concatenate them in order. */
+async function assembleChunks(
+  uploadId: string,
+): Promise<{ data: Uint8Array; urls: string[] }> {
+  const { blobs } = await list({ prefix: `uploads/${uploadId}/` });
+  if (!blobs.length) throw new Error("no chunks");
+  blobs.sort((a, b) => a.pathname.localeCompare(b.pathname));
+
+  const parts: Uint8Array[] = [];
+  for (const b of blobs) {
+    const res = await fetch(b.url);
+    if (!res.ok) throw new Error(String(res.status));
+    parts.push(new Uint8Array(await res.arrayBuffer()));
+  }
+
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const data = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    data.set(p, off);
+    off += p.length;
+  }
+  return { data, urls: blobs.map((b) => b.url) };
 }
 
 /** Extract/OCR → translate → build the Spanish ePub. Throws user-facing errors. */
@@ -96,11 +123,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Accept either a direct multipart upload (small files) or a Blob URL.
+  // Accept a chunked upload (large files), a Blob URL, or a direct multipart
+  // upload (small files).
   const contentType = req.headers.get("content-type") || "";
   let data: Uint8Array;
   let filename: string | undefined;
   let email: string | undefined;
+  let chunkUrls: string[] = [];
 
   if (contentType.includes("application/json")) {
     let body: ConvertBody;
@@ -109,22 +138,35 @@ export async function POST(req: NextRequest) {
     } catch {
       return NextResponse.json({ error: "Petición inválida." }, { status: 400 });
     }
-    if (!body.blobUrl) {
+    filename = body.filename;
+    email = body.email;
+
+    if (body.uploadId) {
+      try {
+        const assembled = await assembleChunks(body.uploadId);
+        data = assembled.data;
+        chunkUrls = assembled.urls;
+      } catch {
+        return NextResponse.json(
+          { error: "No se pudieron recuperar los fragmentos subidos." },
+          { status: 502 },
+        );
+      }
+    } else if (body.blobUrl) {
+      try {
+        const res = await fetch(body.blobUrl);
+        if (!res.ok) throw new Error(String(res.status));
+        data = new Uint8Array(await res.arrayBuffer());
+      } catch {
+        return NextResponse.json(
+          { error: "No se pudo recuperar el archivo subido." },
+          { status: 502 },
+        );
+      }
+    } else {
       return NextResponse.json(
         { error: "No se recibió el archivo subido." },
         { status: 400 },
-      );
-    }
-    filename = body.filename;
-    email = body.email;
-    try {
-      const res = await fetch(body.blobUrl);
-      if (!res.ok) throw new Error(String(res.status));
-      data = new Uint8Array(await res.arrayBuffer());
-    } catch {
-      return NextResponse.json(
-        { error: "No se pudo recuperar el archivo subido." },
-        { status: 502 },
       );
     }
   } else {
@@ -174,6 +216,8 @@ export async function POST(req: NextRequest) {
         const message =
           err instanceof Error ? err.message : "No se pudo convertir el archivo.";
         await emailFailure(to, message).catch(() => {});
+      } finally {
+        if (chunkUrls.length) await del(chunkUrls).catch(() => {});
       }
     });
     return NextResponse.json({ async: true, email: to });
@@ -184,10 +228,12 @@ export async function POST(req: NextRequest) {
   try {
     result = await buildSpanishEpub(data, filename);
   } catch (err) {
+    if (chunkUrls.length) await del(chunkUrls).catch(() => {});
     const message =
       err instanceof Error ? err.message : "No se pudo convertir el archivo.";
     return NextResponse.json({ error: message }, { status: 422 });
   }
+  if (chunkUrls.length) await del(chunkUrls).catch(() => {});
 
   let downloadUrl: string;
   try {
