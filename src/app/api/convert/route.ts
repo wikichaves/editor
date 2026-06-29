@@ -10,8 +10,8 @@ import { emailEpub, emailFailure } from "@/lib/email";
 
 // Must run on Node.js (Buffer + native-free libs), not Edge.
 export const runtime = "nodejs";
-// 300s requires Pro/Fluid; OCR of scanned PDFs can take a while.
-export const maxDuration = 300;
+// Long books take many LLM calls; 800s requires Pro + Fluid Compute.
+export const maxDuration = 800;
 
 interface ConvertBody {
   blobUrl?: string;

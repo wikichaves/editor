@@ -63,8 +63,8 @@ function systemPromptFor({ translate, summarize }: TransformOpts): string {
 }
 
 // How many chunks to send to Claude at once. Parallelism keeps long books
-// within the function time limit; kept modest to respect API rate limits.
-const CONCURRENCY = 6;
+// within the function time limit; balanced against API rate limits.
+const CONCURRENCY = 12;
 
 /** Run `fn` over items with a concurrency cap, preserving input order. */
 async function mapLimit<T, R>(
