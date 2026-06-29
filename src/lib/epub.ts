@@ -14,20 +14,71 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
-/**
- * Build an ePub in memory from translated Spanish text. No images.
- * Single chapter, paragraphs preserved — prioritizes readability over a
- * fancy TOC. Returns a Buffer (never touches disk — key for serverless).
- */
-export async function buildEpub(title: string, spanishText: string): Promise<Buffer> {
-  const paragraphs = spanishText
+// A line that looks like a chapter heading (kept short to avoid false positives).
+const HEADING_RE =
+  /^(?:cap[íi]tulo|chapter|parte|secci[óo]n|pr[óo]logo|prologo|ep[íi]logo|epilogo|introducci[óo]n)\b.{0,60}$/i;
+
+/** Turn a block of text into <p> paragraphs, splitting on blank lines. */
+function paragraphsToHtml(block: string): string {
+  const paras = block
     .split(/\n\n+/)
     .map((p) => p.replace(/\s*\n\s*/g, " ").trim())
     .filter(Boolean);
+  return paras.map((p) => `<p>${escapeHtml(p)}</p>`).join("\n");
+}
 
-  const html = paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join("\n");
+interface Chapter {
+  title: string;
+  body: string;
+}
 
-  const content = [{ title, content: html || "<p></p>" }];
+/**
+ * Split the translated text into chapters by detecting heading lines. When no
+ * headings are found, falls back to a single chapter under the book title.
+ * The list of chapter titles becomes the ePub's navigable table of contents.
+ */
+function splitIntoChapters(bookTitle: string, text: string): Chapter[] {
+  const lines = text.split("\n");
+  const collected: { title: string; lines: string[] }[] = [];
+  let current = { title: bookTitle, lines: [] as string[] };
+  let sawHeading = false;
+
+  const flush = () => {
+    const hasBody = current.lines.some((l) => l.trim());
+    if (hasBody || current.title !== bookTitle) collected.push(current);
+  };
+
+  for (const raw of lines) {
+    if (HEADING_RE.test(raw.trim())) {
+      flush();
+      current = { title: raw.trim(), lines: [] };
+      sawHeading = true;
+    } else {
+      current.lines.push(raw);
+    }
+  }
+  flush();
+
+  if (!sawHeading || collected.length === 0) {
+    return [{ title: bookTitle, body: paragraphsToHtml(text) }];
+  }
+  return collected.map((c) => ({
+    title: c.title,
+    body: paragraphsToHtml(c.lines.join("\n")),
+  }));
+}
+
+/**
+ * Build an ePub in memory from translated Spanish text. No images. Detects
+ * chapters for a navigable TOC. Returns a Buffer (never touches disk — key for
+ * serverless).
+ */
+export async function buildEpub(title: string, spanishText: string): Promise<Buffer> {
+  const chapters = splitIntoChapters(title, spanishText);
+  const content = chapters.map((c) => ({
+    title: c.title,
+    content: c.body || "<p></p>",
+  }));
 
   const buffer = await epub(
     { title, author: "Traducción automática (EN→ES)" },
