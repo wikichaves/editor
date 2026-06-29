@@ -46,38 +46,6 @@ export function chunkText(text: string, maxChars = MAX_CHUNK_CHARS): string[] {
   return chunks;
 }
 
-/**
- * Translate the full text EN→ES chunk by chunk, preserving order, and
- * concatenate the results back together with paragraph breaks.
- */
-export async function translateText(
-  client: Anthropic,
-  fullText: string,
-  onProgress?: (done: number, total: number) => void,
-): Promise<string> {
-  const chunks = chunkText(fullText);
-  const translated: string[] = [];
-
-  for (let i = 0; i < chunks.length; i++) {
-    const message = await client.messages.create({
-      model: TRANSLATION_MODEL,
-      max_tokens: 8192,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: chunks[i] }],
-    });
-
-    const text = message.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("");
-
-    translated.push(text.trim());
-    onProgress?.(i + 1, chunks.length);
-  }
-
-  return translated.join("\n\n");
-}
-
 export interface TransformOpts {
   translate: boolean;
   summarize: boolean;
@@ -94,9 +62,35 @@ function systemPromptFor({ translate, summarize }: TransformOpts): string {
   return "";
 }
 
+// How many chunks to send to Claude at once. Parallelism keeps long books
+// within the function time limit; kept modest to respect API rate limits.
+const CONCURRENCY = 6;
+
+/** Run `fn` over items with a concurrency cap, preserving input order. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
 /**
  * Transform the text per the chosen options: translate EN→ES and/or condense to
  * ~50%. When neither is selected, the text is returned unchanged (no LLM call).
+ * Chunks are processed in parallel (bounded) so long books finish in time.
  */
 export async function transformText(
   client: Anthropic,
@@ -107,21 +101,20 @@ export async function transformText(
 
   const system = systemPromptFor(opts);
   const chunks = chunkText(fullText);
-  const out: string[] = [];
 
-  for (const chunk of chunks) {
+  const out = await mapLimit(chunks, CONCURRENCY, async (chunk) => {
     const message = await client.messages.create({
       model: TRANSLATION_MODEL,
       max_tokens: 8192,
       system,
       messages: [{ role: "user", content: chunk }],
     });
-    const text = message.content
+    return message.content
       .filter((block): block is Anthropic.TextBlock => block.type === "text")
       .map((block) => block.text)
-      .join("");
-    out.push(text.trim());
-  }
+      .join("")
+      .trim();
+  });
 
   return out.join("\n\n");
 }
