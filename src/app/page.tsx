@@ -24,7 +24,7 @@ interface ConvertResult {
 export default function Home() {
   const [status, setStatus] = React.useState<Status>("idle");
   const [fileName, setFileName] = React.useState("");
-  const [email, setEmail] = React.useState("");
+  const [email, setEmail] = React.useState("vos@kindle.com");
   const [error, setError] = React.useState("");
   const [progress, setProgress] = React.useState(0);
   const [result, setResult] = React.useState<ConvertResult | null>(null);
@@ -155,7 +155,8 @@ export default function Home() {
                 </span>
                 <span className="block text-xs font-normal text-[var(--muted-foreground)]">
                   Con email no necesitás esperar ni mantener la página abierta —
-                  ideal para archivos grandes, OCR o conexión lenta.
+                  ideal para archivos grandes, OCR o conexión lenta. Si usás tu
+                  dirección @kindle.com, el ePub te llega directo al Kindle.
                 </span>
                 <input
                   type="email"
