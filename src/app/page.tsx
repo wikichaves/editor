@@ -30,6 +30,7 @@ export default function Home() {
   const [result, setResult] = React.useState<ConvertResult | null>(null);
   const [translate, setTranslate] = React.useState(true);
   const [summarize, setSummarize] = React.useState(false);
+  const [simplify, setSimplify] = React.useState(false);
 
   async function handleFile(file: File) {
     setFileName(file.name);
@@ -52,6 +53,7 @@ export default function Home() {
         if (wantsEmail) fd.append("email", email.trim());
         fd.append("translate", String(translate));
         fd.append("summarize", String(summarize));
+        fd.append("simplify", String(simplify));
         res = await fetch("/api/convert", { method: "POST", body: fd });
       } else {
         setStatus("uploading");
@@ -76,6 +78,7 @@ export default function Home() {
             email: wantsEmail ? email.trim() : undefined,
             translate,
             summarize,
+            simplify,
           }),
         });
       }
@@ -169,11 +172,16 @@ export default function Home() {
                 />
               </label>
 
-              <div className="space-y-2 rounded-lg border border-[var(--border)] px-3 py-3">
+              <div
+                className={`space-y-2 rounded-lg border border-[var(--border)] px-3 py-3 transition-opacity ${
+                  simplify ? "opacity-50" : ""
+                }`}
+              >
                 <label className="flex items-start gap-2.5">
                   <input
                     type="checkbox"
                     checked={translate}
+                    disabled={simplify}
                     onChange={(e) => setTranslate(e.target.checked)}
                     className="mt-0.5 size-4"
                   />
@@ -190,6 +198,7 @@ export default function Home() {
                   <input
                     type="checkbox"
                     checked={summarize}
+                    disabled={simplify}
                     onChange={(e) => setSummarize(e.target.checked)}
                     className="mt-0.5 size-4"
                   />
@@ -201,6 +210,25 @@ export default function Home() {
                   </span>
                 </label>
               </div>
+
+              <label className="flex items-start gap-2.5 rounded-lg border border-[var(--primary)]/40 bg-[var(--primary)]/5 px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={simplify}
+                  onChange={(e) => setSimplify(e.target.checked)}
+                  className="mt-0.5 size-4"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium">
+                    Simplificar para chicos (5-7 años) 🧸
+                  </span>
+                  <span className="block text-xs text-[var(--muted-foreground)]">
+                    Recuenta el libro como cuento para leer en voz alta: español
+                    rioplatense, lenguaje simple pero rico, y unos 5-10 capítulos de
+                    ~20 min (uno por noche). Reemplaza a las opciones de arriba.
+                  </span>
+                </span>
+              </label>
 
               <Dropzone onFile={handleFile} onReject={handleReject} />
             </>

@@ -2,11 +2,19 @@ import { NextRequest, NextResponse, after } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { list, del, get } from "@vercel/blob";
 import { detectKind, extractBookText } from "@/lib/extract";
-import { transformText, translateTitle, type TransformOpts } from "@/lib/translate";
+import { transformText, translateTitle } from "@/lib/translate";
 import { ocrPdf } from "@/lib/ocr";
+import { retellForChild } from "@/lib/retell";
 import { extractPdfCover } from "@/lib/cover";
-import { buildEpub } from "@/lib/epub";
+import { buildEpub, buildEpubFromChapters, type ChapterInput } from "@/lib/epub";
 import { emailEpub, emailFailure } from "@/lib/email";
+
+/** Conversion options. `simplify` (child retelling) overrides the other two. */
+interface JobOpts {
+  translate: boolean;
+  summarize: boolean;
+  simplify: boolean;
+}
 
 // Must run on Node.js (Buffer + native-free libs), not Edge.
 export const runtime = "nodejs";
@@ -20,6 +28,7 @@ interface ConvertBody {
   email?: string;
   translate?: boolean;
   summarize?: boolean;
+  simplify?: boolean;
 }
 
 /** Fetch all chunks of an upload from Blob and concatenate them in order. */
@@ -49,11 +58,11 @@ async function assembleChunks(
   return { data, urls: blobs.map((b) => b.url) };
 }
 
-/** Extract/OCR → (optionally translate/summarize) → build the ePub. */
+/** Extract/OCR → (translate/summarize or child-retell) → build the ePub. */
 async function buildEpubJob(
   data: Uint8Array,
   filename: string | undefined,
-  opts: TransformOpts,
+  opts: JobOpts,
 ): Promise<{ title: string; epub: Buffer }> {
   const kind = detectKind(data);
   if (!kind) throw new Error("Formato no reconocido. Subí un PDF, EPUB o AZW3.");
@@ -63,31 +72,53 @@ async function buildEpubJob(
 
   // Extract from a COPY: pdf.js detaches the buffer it reads, and we still need
   // the original bytes if we fall back to OCR.
-  const fullText = (await extractBookText(data.slice())).trim();
-  const needsOcr = kind === "pdf" && fullText.length < 30; // scanned PDF
+  const extracted = (await extractBookText(data.slice())).trim();
+  const needsOcr = kind === "pdf" && extracted.length < 30; // scanned PDF
 
-  if (!fullText && !needsOcr) {
+  if (!extracted && !needsOcr) {
     throw new Error(
       "El archivo no tiene capa de texto y no se pudo hacer OCR. Solo se admiten archivos con texto (o PDFs escaneados).",
     );
   }
 
   const client = new Anthropic();
-  // Scanned PDFs always need Claude to read them (OCR); text files only call
-  // the model when translating and/or summarizing.
   const t0 = Date.now();
   console.log(
-    `job: kind=${kind} needsOcr=${needsOcr} textLen=${fullText.length} translate=${opts.translate} summarize=${opts.summarize}`,
+    `job: kind=${kind} needsOcr=${needsOcr} textLen=${extracted.length} translate=${opts.translate} summarize=${opts.summarize} simplify=${opts.simplify}`,
   );
-  const body = needsOcr
-    ? await ocrPdf(client, data, opts)
-    : await transformText(client, fullText, opts);
-  console.log(`job: transform done in ${Math.round((Date.now() - t0) / 1000)}s, outLen=${body.length}`);
 
-  // Clean the file-name-derived title; translate it only when translating.
+  // The source text. For scanned PDFs we OCR first: a faithful transcription
+  // when we're going to retell, otherwise OCR applies translate/summarize.
+  let sourceText = extracted;
+  if (needsOcr) {
+    sourceText = await ocrPdf(
+      client,
+      data,
+      opts.simplify ? { translate: false, summarize: false } : opts,
+    );
+  }
+
+  // Build either explicit chapters (child retelling) or a flat body of text.
+  let chapters: ChapterInput[] | null = null;
+  let body = "";
+  if (opts.simplify) {
+    chapters = await retellForChild(client, sourceText);
+  } else if (needsOcr) {
+    body = sourceText; // OCR already applied translate/summarize
+  } else {
+    body = await transformText(client, sourceText, opts);
+  }
+  const outLen = chapters
+    ? chapters.reduce((n, c) => n + c.text.length, 0)
+    : body.length;
+  console.log(
+    `job: transform done in ${Math.round((Date.now() - t0) / 1000)}s, outLen=${outLen}`,
+  );
+
+  // Clean the file-name-derived title; translate it when translating/simplifying.
   const rawTitle = (filename || "libro").replace(/\.(pdf|epub|azw3|azw|mobi)$/i, "");
   let title = cleanTitle(rawTitle) || "Libro";
-  if (opts.translate) {
+  if (opts.translate || opts.simplify) {
     try {
       title = await translateTitle(client, title);
     } catch {
@@ -105,7 +136,9 @@ async function buildEpubJob(
     }
   }
 
-  const epub = await buildEpub(title, body, cover);
+  const epub = chapters
+    ? await buildEpubFromChapters(title, chapters, cover)
+    : await buildEpub(title, body, cover);
   return { title, epub };
 }
 
@@ -142,8 +175,8 @@ export async function POST(req: NextRequest) {
   let filename: string | undefined;
   let email: string | undefined;
   let chunkUrls: string[] = [];
-  // Defaults: translate on, summarize off.
-  let opts: TransformOpts = { translate: true, summarize: false };
+  // Defaults: translate on, summarize off, simplify off.
+  let opts: JobOpts = { translate: true, summarize: false, simplify: false };
 
   if (contentType.includes("application/json")) {
     let body: ConvertBody;
@@ -154,7 +187,11 @@ export async function POST(req: NextRequest) {
     }
     filename = body.filename;
     email = body.email;
-    opts = { translate: body.translate !== false, summarize: body.summarize === true };
+    opts = {
+      translate: body.translate !== false,
+      summarize: body.summarize === true,
+      simplify: body.simplify === true,
+    };
 
     if (body.uploadId) {
       try {
@@ -204,6 +241,7 @@ export async function POST(req: NextRequest) {
     opts = {
       translate: form.get("translate") !== "false",
       summarize: form.get("summarize") === "true",
+      simplify: form.get("simplify") === "true",
     };
     data = new Uint8Array(await file.arrayBuffer());
   }

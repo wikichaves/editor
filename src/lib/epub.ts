@@ -68,6 +68,22 @@ function splitIntoChapters(bookTitle: string, text: string): Chapter[] {
   }));
 }
 
+/** Assemble an ePub from ready-made chapter HTML. Shared by both builders. */
+async function assemble(
+  title: string,
+  author: string,
+  content: { title: string; content: string }[],
+  coverImage?: Buffer,
+): Promise<Buffer> {
+  const options: Parameters<typeof epub>[0] = { title, author };
+  if (coverImage) {
+    options.cover = new File([new Uint8Array(coverImage)], "cover.jpg", {
+      type: "image/jpeg",
+    });
+  }
+  return epub(options, content);
+}
+
 /**
  * Build an ePub in memory from translated Spanish text. Detects chapters for a
  * navigable TOC and, when provided, sets a cover image. Returns a Buffer
@@ -83,17 +99,28 @@ export async function buildEpub(
     title: c.title,
     content: c.body || "<p></p>",
   }));
+  return assemble(title, "Generado automáticamente", content, coverImage);
+}
 
-  const options: Parameters<typeof epub>[0] = {
-    title,
-    author: "Generado automáticamente",
-  };
-  if (coverImage) {
-    options.cover = new File([new Uint8Array(coverImage)], "cover.jpg", {
-      type: "image/jpeg",
-    });
-  }
+export interface ChapterInput {
+  title: string;
+  text: string;
+}
 
-  const buffer = await epub(options, content);
-  return buffer;
+/**
+ * Build an ePub from explicit chapters (title + plain text). Used by the
+ * child-retelling mode, where chapter boundaries are known up front and we
+ * don't want to rely on heading detection. Each chapter's title becomes a TOC
+ * entry.
+ */
+export async function buildEpubFromChapters(
+  title: string,
+  chapters: ChapterInput[],
+  coverImage?: Buffer,
+): Promise<Buffer> {
+  const content = chapters.map((c) => ({
+    title: c.title,
+    content: paragraphsToHtml(c.text) || "<p></p>",
+  }));
+  return assemble(title, "Adaptado para leer en familia", content, coverImage);
 }
