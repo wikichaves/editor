@@ -323,6 +323,9 @@ export default function Home() {
       <p className="mt-4 text-center text-xs text-[var(--muted-foreground)]">
         Traducción con Anthropic Claude · OCR para escaneados · Sin imágenes
       </p>
+      <p className="mt-1 text-center text-[10px] text-[var(--muted-foreground)]/70">
+        {process.env.NEXT_PUBLIC_APP_VERSION ?? "v?"}
+      </p>
     </main>
   );
 }
