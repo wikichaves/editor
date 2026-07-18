@@ -269,10 +269,20 @@ export async function POST(req: NextRequest) {
       try {
         const { title, epub } = await buildEpubJob(data, filename, opts);
         await emailEpub({ to, title, epub });
+        console.log(`email: sent "${title}" (${epub.length} bytes) to ${to}`);
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "No se pudo convertir el archivo.";
-        await emailFailure(to, message).catch(() => {});
+        console.error(`email: job failed for ${to}: ${message}`);
+        await emailFailure(to, message)
+          .then(() => console.log(`email: failure notice sent to ${to}`))
+          .catch((e) =>
+            console.error(
+              `email: could not send failure notice to ${to}: ${
+                e instanceof Error ? e.message : e
+              }`,
+            ),
+          );
       } finally {
         if (chunkUrls.length) await del(chunkUrls).catch(() => {});
       }
