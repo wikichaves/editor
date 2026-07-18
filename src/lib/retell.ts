@@ -19,11 +19,14 @@ const TARGET_WORDS_PER_CHAPTER = 2160;
 const MIN_CHAPTERS = 5;
 const MAX_CHAPTERS = 10;
 
-// Bigger chunks than translation: we only need the gist per piece here.
-const MAP_CHUNK_CHARS = 6000;
-// When the joined summaries exceed this, reduce them another round.
-const REDUCE_TARGET_CHARS = 14000;
-const REDUCE_BATCH_CHARS = 10000;
+// Big chunks: we only need the gist per piece, and fewer calls keeps us well
+// inside the function time limit for long books.
+const MAP_CHUNK_CHARS = 20000;
+// Once the joined summaries fit under this, a single synopsis call handles them
+// (Sonnet's context is large, so this can be generous — fewer reduce rounds).
+const REDUCE_TARGET_CHARS = 48000;
+// Max reduce rounds before we force the synopsis (guards against non-convergence).
+const MAX_REDUCE_ROUNDS = 3;
 
 const CONCURRENCY = 8;
 
@@ -79,26 +82,8 @@ async function summariseChunks(
 ): Promise<string[]> {
   const chunks = chunkText(fullText, MAP_CHUNK_CHARS);
   return mapLimit(chunks, CONCURRENCY, (chunk) =>
-    complete(client, MAP_SYSTEM, chunk, 1024),
+    complete(client, MAP_SYSTEM, chunk, 900),
   );
-}
-
-/** Group consecutive strings into batches under a char budget. */
-function batchByChars(items: string[], budget: number): string[][] {
-  const batches: string[][] = [];
-  let current: string[] = [];
-  let size = 0;
-  for (const it of items) {
-    if (size + it.length > budget && current.length) {
-      batches.push(current);
-      current = [];
-      size = 0;
-    }
-    current.push(it);
-    size += it.length + 2;
-  }
-  if (current.length) batches.push(current);
-  return batches;
 }
 
 const REDUCE_SYSTEM =
@@ -113,14 +98,31 @@ async function buildSynopsis(
   summaries: string[],
 ): Promise<string> {
   let level = summaries;
-  // Fold until the combined summaries are small enough for one synopsis call.
-  while (level.join("\n\n").length > REDUCE_TARGET_CHARS && level.length > 1) {
-    const batches = batchByChars(level, REDUCE_BATCH_CHARS);
+  let round = 0;
+  // Fold until small enough, ALWAYS shrinking the item count (fan-in ~4×) so
+  // we can't stall, and never more than MAX_REDUCE_ROUNDS.
+  while (
+    level.length > 1 &&
+    level.join("\n\n").length > REDUCE_TARGET_CHARS &&
+    round < MAX_REDUCE_ROUNDS
+  ) {
+    round++;
+    const groups = Math.max(1, Math.ceil(level.length / 4));
+    const perGroup = Math.ceil(level.length / groups);
+    const batches: string[][] = [];
+    for (let i = 0; i < level.length; i += perGroup) {
+      batches.push(level.slice(i, i + perGroup));
+    }
     level = await mapLimit(batches, CONCURRENCY, (batch) =>
-      complete(client, REDUCE_SYSTEM, batch.join("\n\n"), 2048),
+      complete(client, REDUCE_SYSTEM, batch.join("\n\n"), 1500),
     );
   }
-  return complete(client, SYNOPSIS_SYSTEM, level.join("\n\n"), 4096);
+  // Safety net: never feed an unbounded blob to the synopsis call.
+  let combined = level.join("\n\n");
+  if (combined.length > REDUCE_TARGET_CHARS) {
+    combined = combined.slice(0, REDUCE_TARGET_CHARS);
+  }
+  return complete(client, SYNOPSIS_SYSTEM, combined, 4096);
 }
 
 interface PlannedChapter {
@@ -220,12 +222,16 @@ export async function retellForChild(
     throw new Error("No hay texto para simplificar.");
   }
 
+  const t0 = Date.now();
   const summaries = await summariseChunks(client, fullText);
-  const synopsis = await buildSynopsis(client, summaries);
-  const plan = await planChapters(client, synopsis);
+  console.log(`retell: mapped ${summaries.length} chunks in ${Math.round((Date.now() - t0) / 1000)}s`);
 
+  const synopsis = await buildSynopsis(client, summaries);
+  console.log(`retell: synopsis ${synopsis.length} chars in ${Math.round((Date.now() - t0) / 1000)}s`);
+
+  const plan = await planChapters(client, synopsis);
   const titles = plan.map((c, i) => tidyTitle(c.titulo, i + 1));
-  console.log(`retell: ${plan.length} chapters planned`);
+  console.log(`retell: ${plan.length} chapters planned in ${Math.round((Date.now() - t0) / 1000)}s`);
 
   const bodies = await mapLimit(plan, Math.min(CONCURRENCY, plan.length), (c, i) =>
     writeChapter(client, synopsis, titles, i, c),
