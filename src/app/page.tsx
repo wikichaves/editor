@@ -14,6 +14,9 @@ import {
 
 type Status = "idle" | "uploading" | "processing" | "done" | "error";
 
+/** Above this size a conversion takes long enough that we require an email. */
+const SLOW_JOB_BYTES = 1024 * 1024;
+
 interface ConvertResult {
   title?: string;
   downloadUrl?: string;
@@ -26,6 +29,7 @@ export default function Home() {
   const [fileName, setFileName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [error, setError] = React.useState("");
+  const [errorTitle, setErrorTitle] = React.useState("No se pudo convertir");
   const [progress, setProgress] = React.useState(0);
   const [result, setResult] = React.useState<ConvertResult | null>(null);
   const [translate, setTranslate] = React.useState(true);
@@ -56,13 +60,29 @@ export default function Home() {
   }, []);
 
   async function handleFile(file: File) {
+    const wantsEmail = email.trim().length > 0;
+    // Without an email we hold the browser connection open for the whole
+    // conversion. That's fine for a quick job, but a big book (or the
+    // multi-pass child retelling) takes minutes and just looks hung — so ask
+    // for an address and deliver it in the background instead.
+    if (!wantsEmail && (simplify || file.size > SLOW_JOB_BYTES)) {
+      setFileName("");
+      setErrorTitle("Necesitamos tu email");
+      setError(
+        simplify
+          ? "Para simplificar un libro necesitamos tu email: tarda varios minutos y te lo mandamos cuando esté listo."
+          : "Este archivo es grande y va a tardar varios minutos. Dejanos tu email y te mandamos el ePub cuando esté listo.",
+      );
+      setStatus("error");
+      return;
+    }
+
     setFileName(file.name);
     setError("");
     setResult(null);
     setProgress(0);
 
     try {
-      const wantsEmail = email.trim().length > 0;
       // Small files (< 4.5 MB request limit) POST directly. Larger files are
       // sent in chunks straight to the function (/api/chunk) — the only upload
       // channel that proved reliable — then assembled server-side.
@@ -114,6 +134,7 @@ export default function Home() {
         } catch {
           // keep default
         }
+        setErrorTitle("No se pudo convertir");
         setError(message);
         setStatus("error");
         return;
@@ -138,6 +159,7 @@ export default function Home() {
       }
       setStatus("done");
     } catch (err) {
+      setErrorTitle("No se pudo convertir");
       setError(
         err instanceof Error ? err.message : "No se pudo conectar con el servidor.",
       );
@@ -147,6 +169,7 @@ export default function Home() {
 
   function handleReject(message: string) {
     setFileName("");
+    setErrorTitle("No se pudo convertir");
     setError(message);
     setStatus("error");
   }
@@ -165,24 +188,21 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle>PDF · EPUB · AZW3 → ePub</CardTitle>
-          <CardDescription>
-            Subí un PDF (incluso escaneado), EPUB o AZW3 y descargá un ePub.
-            Opcionalmente lo traducimos al español y/o lo resumimos. La salida no
-            incluye imágenes.
+          <CardTitle className="text-2xl">PDF · EPUB · AZW3 → ePub</CardTitle>
+          <CardDescription className="text-base">
+            Convertí un libro a ePub, traducido al español si querés.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {status === "idle" && (
             <>
               <label className="block space-y-1.5">
-                <span className="text-sm font-medium">
-                  Email — te mandamos el ePub (recomendado)
+                <span className="text-base font-medium">
+                  Email {simplify && <span className="font-normal text-[var(--muted-foreground)]">(necesario)</span>}
                 </span>
-                <span className="block text-xs font-normal text-[var(--muted-foreground)]">
-                  Con email no necesitás esperar ni mantener la página abierta —
-                  ideal para archivos grandes, OCR o conexión lenta. Si usás tu
-                  dirección @kindle.com, el ePub te llega directo al Kindle.
+                <span className="block text-sm font-normal text-[var(--muted-foreground)]">
+                  Te lo mandamos cuando esté listo. Con una dirección @kindle.com
+                  llega directo al Kindle.
                 </span>
                 <input
                   type="email"
@@ -197,7 +217,7 @@ export default function Home() {
                   placeholder="vos@ejemplo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--primary)]"
+                  className="w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2.5 text-base outline-none focus:border-[var(--primary)]"
                 />
               </label>
 
@@ -215,11 +235,11 @@ export default function Home() {
                     className="mt-0.5 size-4"
                   />
                   <span className="space-y-0.5">
-                    <span className="block text-sm font-medium">
+                    <span className="block text-base font-medium">
                       Traducir al español
                     </span>
-                    <span className="block text-xs text-[var(--muted-foreground)]">
-                      Si lo destildás, el ePub queda en el idioma original.
+                    <span className="block text-sm text-[var(--muted-foreground)]">
+                      Si no, queda en el idioma original.
                     </span>
                   </span>
                 </label>
@@ -232,9 +252,9 @@ export default function Home() {
                     className="mt-0.5 size-4"
                   />
                   <span className="space-y-0.5">
-                    <span className="block text-sm font-medium">Resumir</span>
-                    <span className="block text-xs text-[var(--muted-foreground)]">
-                      Acorta el contenido a la mitad (~50%), conservando lo esencial.
+                    <span className="block text-base font-medium">Resumir</span>
+                    <span className="block text-sm text-[var(--muted-foreground)]">
+                      Lo acorta a la mitad.
                     </span>
                   </span>
                 </label>
@@ -248,13 +268,12 @@ export default function Home() {
                   className="mt-0.5 size-4"
                 />
                 <span className="space-y-0.5">
-                  <span className="block text-sm font-medium">
+                  <span className="block text-base font-medium">
                     Simplificar para chicos (5-7 años) 🧸
                   </span>
-                  <span className="block text-xs text-[var(--muted-foreground)]">
-                    Recuenta el libro como cuento para leer en voz alta: español
-                    rioplatense, lenguaje simple pero rico, y unos 5-10 capítulos de
-                    ~20 min (uno por noche). Reemplaza a las opciones de arriba.
+                  <span className="block text-sm text-[var(--muted-foreground)]">
+                    Lo recuenta como cuento para leer en voz alta, en capítulos de
+                    ~20 min: uno por noche.
                   </span>
                 </span>
               </label>
@@ -267,7 +286,7 @@ export default function Home() {
             <div className="flex flex-col items-center gap-3 rounded-xl border border-[var(--border)] px-6 py-14 text-center">
               <Loader2 className="size-8 animate-spin text-[var(--muted-foreground)]" />
               <div className="w-full space-y-1">
-                <p className="text-sm font-medium">
+                <p className="text-base font-medium">
                   {status === "uploading" && progress < 100
                     ? `Subiendo… ${progress}%`
                     : "Procesando…"}
@@ -280,12 +299,12 @@ export default function Home() {
                     />
                   </div>
                 )}
-                <p className="text-xs text-[var(--muted-foreground)]">
+                <p className="text-sm text-[var(--muted-foreground)]">
                   {status === "uploading" && progress < 100
                     ? "Subiendo el archivo."
-                    : "Extrayendo el texto, traduciendo y armando el ePub. Puede tardar según el tamaño."}
+                    : "Puede tardar unos minutos."}
                 </p>
-                <p className="truncate text-xs text-[var(--muted-foreground)]">
+                <p className="truncate text-sm text-[var(--muted-foreground)]">
                   {fileName}
                 </p>
               </div>
@@ -298,12 +317,12 @@ export default function Home() {
               {result.async ? (
                 <>
                   <div className="space-y-1">
-                    <p className="text-sm font-medium">¡Recibido!</p>
-                    <p className="flex items-center justify-center gap-1.5 text-xs text-[var(--muted-foreground)]">
-                      <Mail className="size-3.5" /> Te lo enviamos a {result.email} cuando
-                      termine (unos minutos).
+                    <p className="text-base font-medium">¡Recibido!</p>
+                    <p className="flex items-center justify-center gap-1.5 text-sm text-[var(--muted-foreground)]">
+                      <Mail className="size-4" /> Te llega a {result.email} en unos
+                      minutos.
                     </p>
-                    <p className="text-xs text-[var(--muted-foreground)]">
+                    <p className="text-sm text-[var(--muted-foreground)]">
                       Ya podés cerrar esta página.
                     </p>
                   </div>
@@ -314,9 +333,9 @@ export default function Home() {
               ) : (
                 <>
                   <div className="space-y-1">
-                    <p className="text-sm font-medium">¡Listo!</p>
-                    <p className="text-xs text-[var(--muted-foreground)]">
-                      La descarga del .epub debería empezar.
+                    <p className="text-base font-medium">¡Listo!</p>
+                    <p className="text-sm text-[var(--muted-foreground)]">
+                      La descarga debería empezar sola.
                     </p>
                   </div>
                   {result.downloadUrl && (
@@ -338,8 +357,8 @@ export default function Home() {
             <div className="flex flex-col items-center gap-3 rounded-xl border border-red-300 bg-red-50 px-6 py-14 text-center dark:bg-red-950/30">
               <AlertCircle className="size-8 text-red-600" />
               <div className="space-y-1">
-                <p className="text-sm font-medium">No se pudo convertir</p>
-                <p className="text-xs text-[var(--muted-foreground)]">{error}</p>
+                <p className="text-base font-medium">{errorTitle}</p>
+                <p className="text-sm text-[var(--muted-foreground)]">{error}</p>
               </div>
               <Button onClick={reset} variant="outline" size="sm">
                 Probar de nuevo
@@ -349,10 +368,10 @@ export default function Home() {
         </CardContent>
       </Card>
 
-      <p className="mt-4 text-center text-xs text-[var(--muted-foreground)]">
-        Traducción con Anthropic Claude · OCR para escaneados · Sin imágenes
+      <p className="mt-4 text-center text-sm text-[var(--muted-foreground)]">
+        Con Claude · OCR para escaneados · Sin imágenes
       </p>
-      <p className="mt-1 text-center text-[10px] text-[var(--muted-foreground)]/70">
+      <p className="mt-1 text-center text-xs text-[var(--muted-foreground)]/70">
         {process.env.NEXT_PUBLIC_APP_VERSION ?? "v?"}
       </p>
     </main>

@@ -69,11 +69,11 @@ export function Dropzone({ onFile, onReject, disabled }: DropzoneProps) {
     >
       <UploadCloud className="size-8 text-[var(--muted-foreground)]" />
       <div className="space-y-1">
-        <p className="text-sm font-medium">
-          Arrastrá un PDF, EPUB o AZW3 acá o hacé clic para elegir
+        <p className="text-base font-medium">
+          Arrastrá el libro acá o hacé clic para elegir
         </p>
-        <p className="text-xs text-[var(--muted-foreground)]">
-          PDF (incluso escaneado), EPUB o AZW3. Sin imágenes en la salida.
+        <p className="text-sm text-[var(--muted-foreground)]">
+          PDF (incluso escaneado), EPUB o AZW3.
         </p>
       </div>
       <input
