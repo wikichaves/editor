@@ -1,33 +1,65 @@
-# PDF · EPUB · AZW3 → ePub (Español)
+# Wiki Editor — PDF · EPUB · AZW3 → ePub
 
-App web personal que convierte un libro **en inglés** (con capa de texto) en un
-**ePub en español**, sin imágenes. Acepta **PDF**, **EPUB** y **AZW3** como
-entrada — no soporta OCR ni archivos escaneados.
+App web que convierte un libro (**PDF**, **EPUB** o **AZW3**) en un **ePub**
+listo para leer en un e-reader. Opcionalmente lo **traduce al español**, lo
+**resume**, o lo **recuenta como cuento para chicos de 5-7 años**. Puede
+enviarte el resultado por email — incluso directo a tu Kindle.
 
-## Cómo funciona
+La salida es solo texto: capítulos con índice navegable y una tapa, sin las
+imágenes del interior.
 
-1. Subís un `.pdf`, `.epub` o `.azw3` en el dropzone.
-2. El endpoint `POST /api/convert` detecta el formato por sus *magic bytes* (no
-   por la extensión) y extrae el texto según corresponda:
-   - **PDF** con [`unpdf`](https://github.com/unjs/unpdf).
-   - **EPUB** descomprimiendo el ZIP y leyendo el XHTML en orden del *spine*
-     (con [`jszip`](https://stuk.github.io/jszip/)).
-   - **AZW3/MOBI** con un parser propio *best-effort* (PDB + PalmDOC). DRM y
-     compresión HUFF/CDIC se rechazan con un mensaje claro.
-3. Trocea el texto en bloques de ~3500 caracteres respetando los saltos de
-   párrafo, traduce cada bloque EN→ES con la API de Anthropic
-   (`claude-sonnet-4-6`) y arma el ePub en memoria con
-   [`epub-gen-memory`](https://github.com/cpiber/epub-gen-memory).
-4. El navegador descarga el `.epub` resultante.
+## Qué hace
+
+Al subir un archivo, `POST /api/convert` detecta el formato por sus *magic
+bytes* (no por la extensión) y extrae el texto:
+
+- **PDF** con [`unpdf`](https://github.com/unjs/unpdf). Si no tiene capa de
+  texto (escaneado), cae a **OCR** (ver abajo).
+- **EPUB** descomprimiendo el ZIP y leyendo el XHTML en orden del *spine*
+  (con [`jszip`](https://stuk.github.io/jszip/)).
+- **AZW3/MOBI** con un parser propio *best-effort* (PDB + PalmDOC). DRM y
+  compresión HUFF/CDIC se rechazan con un mensaje claro.
+
+Después aplica el modo elegido y arma el ePub en memoria con
+[`epub-gen-memory`](https://github.com/cpiber/epub-gen-memory).
+
+### Modos
+
+| Modo | Qué hace |
+| --- | --- |
+| **Traducir al español** (por defecto) | Traduce EN→ES por bloques de ~3500 caracteres, en paralelo. |
+| **Resumir** | Condensa el contenido a ~50%, conservando lo esencial. |
+| **Simplificar para chicos (5-7 años)** | Recuenta el libro entero como cuento para leer en voz alta. Reemplaza a los dos anteriores. |
+
+El modo **simplificar** no es un resumen por partes: primero *entiende el libro
+completo* (resumen map-reduce → sinopsis), después *planifica* entre 5 y 10
+capítulos de ~20 minutos de lectura en voz alta, y recién ahí *escribe* cada
+uno. Es fiel a la trama y los personajes, en **español rioplatense**, con
+lenguaje simple pero rico; los momentos difíciles se cuentan con delicadeza en
+lugar de omitirse. Ver `src/lib/retell.ts`.
+
+### Tapas
+
+Cada libro recibe una tapa, en este orden de preferencia:
+
+1. La tapa original del **EPUB** (vía el OPF: `meta name="cover"`,
+   `properties="cover-image"` o un archivo que se llame *cover*).
+2. La imagen más prominente de las primeras páginas del **PDF**.
+3. Si no hay ninguna: una **tapa tipográfica generada** con el título, en un
+   tono derivado del propio título para que dos libros no se vean iguales.
+
+Todas pasan por el mismo filtro: escala de grises, contraste suave para e-ink y
+redimensionado a 600×800 (ver `src/lib/cover.ts`).
 
 Todo corre en el runtime **Node.js** (no Edge) y el ePub se genera **en
-memoria** — nunca se escribe a disco, así anda en serverless (Vercel).
+memoria** — nunca se escribe a disco, así funciona en serverless.
 
 ## Stack
 
 - Next.js 15 (App Router) + React 19 + TypeScript
 - Tailwind v4 + componentes estilo shadcn/ui
-- `@anthropic-ai/sdk`, `unpdf`, `jszip`, `epub-gen-memory`
+- `@anthropic-ai/sdk`, `unpdf`, `jszip`, `pdf-lib`, `sharp`,
+  `epub-gen-memory`, `@vercel/blob`, `resend`
 
 ## Setup local
 
@@ -41,52 +73,83 @@ Abrí http://localhost:3000.
 
 ### Variables de entorno
 
-| Variable                | Requerida | Descripción                                                       |
-| ----------------------- | --------- | ----------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`     | sí        | API key de Anthropic. https://console.anthropic.com/              |
-| `BLOB_READ_WRITE_TOKEN` | sí        | Token de Vercel Blob. Se auto-setea al conectar un Blob store.    |
-| `RESEND_API_KEY`        | no        | Solo si querés enviar el ePub por email. https://resend.com/      |
-| `EMAIL_FROM`            | no        | Remitente. Sin dominio verificado, Resend solo entrega al dueño de la cuenta. |
+| Variable | Requerida | Descripción |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | sí | API key de Anthropic. https://console.anthropic.com/ |
+| `BLOB_READ_WRITE_TOKEN` | para archivos >4 MB | Token de Vercel Blob. Se auto-setea al conectar un Blob store. |
+| `RESEND_API_KEY` | no | Solo si querés enviar el ePub por email. https://resend.com/ |
+| `EMAIL_FROM` | no | Remitente, ej. `Wiki Editor <editor@tudominio.com>`. Sin dominio verificado, Resend solo entrega al dueño de la cuenta. |
 
-Sin `ANTHROPIC_API_KEY` la traducción falla (500). Sin `BLOB_READ_WRITE_TOKEN`
-fallan la subida y el guardado del resultado.
+Sin `ANTHROPIC_API_KEY` la conversión falla (500).
 
-### Por qué Vercel Blob
+### Prefijar el destinatario
+
+El campo de email se puede precompletar por querystring, y queda recordado en
+el navegador para las visitas siguientes:
+
+```
+https://tu-app.vercel.app/?email=vos@ejemplo.com
+```
+
+## Archivos grandes
 
 Las funciones serverless de Vercel limitan el cuerpo del request a **4.5 MB**.
-Para soportar libros más grandes, el navegador sube el archivo **directo a
-Blob** (`/api/upload` emite el token) y `/api/convert` lo procesa desde la URL
-del blob. El ePub resultante también se guarda en Blob para tener una URL de
-descarga estable (útil en celular, donde la descarga vía JS suele fallar).
+Por eso:
+
+- **≤ 4 MB** → el navegador hace un POST directo a `/api/convert`.
+- **> 4 MB** → el navegador parte el archivo en fragmentos de 4 MB y los manda
+  a `/api/chunk`, que los guarda en Vercel Blob (acceso **privado**);
+  `/api/convert` los reensambla, procesa y limpia.
+
+El ePub resultante se devuelve en la respuesta (descarga directa) o se manda
+como adjunto por email — nunca se publica en una URL pública.
+
+## Entrega por email y Kindle
+
+Si completás el email, la conversión corre en segundo plano (`next/after`) y el
+ePub llega como adjunto: no hace falta dejar la página abierta. Útil para
+libros largos u OCR.
+
+Para que llegue **directo al Kindle**:
+
+1. Verificá un dominio propio en Resend y seteá `EMAIL_FROM` con una dirección
+   de ese dominio (el remitente de prueba `onboarding@resend.dev` solo entrega
+   al dueño de la cuenta de Resend).
+2. En Amazon → *Manage Your Content and Devices* → *Preferences* → *Personal
+   Document Settings*, agregá esa dirección a la **Approved Personal Document
+   E-mail List**.
+3. Usá tu dirección `@kindle.com` como destinatario. Amazon convierte el EPUB
+   al formato Kindle automáticamente.
+
+## OCR de PDFs escaneados
+
+Si un PDF no tiene capa de texto, se usa el **soporte nativo de PDF de Claude**:
+el archivo se manda al modelo, que lo lee (visión) y devuelve el texto. No hay
+rasterización ni dependencias nativas. Los PDFs de más de 12 páginas se parten
+en lotes que se procesan en paralelo. Límites: **100 páginas / 30 MB** por
+archivo (ver `src/lib/ocr.ts`).
 
 ## Deploy en Vercel
 
-1. Subí el repo a GitHub (privado).
-2. En Vercel: **Add New… → Project → Import** el repo.
-3. Framework: Next.js (autodetectado). No hace falta tocar build settings.
-4. **Conectá un Blob store:** en **Storage → Create → Blob**, conectalo al
-   proyecto. Eso agrega `BLOB_READ_WRITE_TOKEN` automáticamente.
-5. **⚠️ Variables de entorno** (**Settings → Environment Variables**, Production):
-   - `ANTHROPIC_API_KEY` (obligatoria; sin ella el deploy compila pero falla al convertir).
-   - `RESEND_API_KEY` (opcional, para email). Tip: registrate en Resend con la
-     casilla a la que querés que lleguen los envíos; así el remitente de prueba
-     `onboarding@resend.dev` puede entregarte sin verificar un dominio.
-6. Deploy.
+1. Importá el repo en Vercel (**Add New… → Project**). Framework: Next.js
+   (autodetectado).
+2. **Conectá un Blob store**: *Storage → Create → Blob*. Eso agrega
+   `BLOB_READ_WRITE_TOKEN` automáticamente.
+3. Cargá `ANTHROPIC_API_KEY` (y `RESEND_API_KEY` / `EMAIL_FROM` si vas a usar
+   email) en *Settings → Environment Variables*.
+4. Deploy.
 
-### OCR de PDFs escaneados
+### Límite de tiempo
 
-Si un PDF no tiene capa de texto (escaneado), se usa el **soporte nativo de
-PDF de Claude**: el archivo se manda tal cual al modelo, que lo lee (vía visión)
-y devuelve el texto ya traducido. No hay rasterización ni dependencias nativas.
-Límites por request: **100 páginas / 30 MB** (ver `src/lib/ocr.ts`).
+`/api/convert` declara `maxDuration = 800` segundos, que requiere **Pro + Fluid
+Compute** (en Hobby el máximo es 60). Los libros largos y el OCR lo necesitan.
 
-### Sobre el límite de tiempo
+### Versión
 
-El handler declara `maxDuration = 300` (segundos), que requiere **Pro / Fluid
-Compute** (en Hobby el máximo es 60). El OCR de PDFs escaneados puede tardar,
-por eso conviene el límite alto.
+El pie de la app muestra `vX.Y.Z+<sha>` — la versión de `package.json` más el
+commit desplegado, para saber qué build estás probando.
 
-## Cambiar el modelo de traducción
+## Cambiar el modelo
 
 En `src/lib/translate.ts`, la constante `TRANSLATION_MODEL`. Alternativa más
 barata: `claude-haiku-4-5-20251001`.
@@ -95,10 +158,13 @@ barata: `claude-haiku-4-5-20251001`.
 
 El parser de AZW3/MOBI cubre la mayoría de los archivos (sin comprimir y
 PalmDOC), pero **no** soporta DRM ni compresión HUFF/CDIC. Si un AZW3 falla,
-convertilo antes a EPUB con [Calibre](https://calibre-ebook.com/) y subí ese.
+convertilo antes a EPUB con [Calibre](https://calibre-ebook.com/).
 
 ## Fuera de alcance
 
-Sin auth, sin base de datos, sin extracción/embebido de imágenes y sin
-reconstrucción de layouts complejos (columnas, tablas, fórmulas). El OCR cubre
-PDFs escaneados de hasta 100 páginas por request.
+Sin auth, sin base de datos, sin extracción de imágenes del interior y sin
+reconstrucción de layouts complejos (columnas, tablas, fórmulas).
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE).
