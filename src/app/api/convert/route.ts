@@ -282,7 +282,13 @@ export async function POST(req: NextRequest) {
       try {
         const { title, epub } = await buildEpubJob(data, filename, opts);
         await emailEpub({ to, title, epub });
-        console.log(`email: sent "${title}" (${epub.length} bytes) to ${to}`);
+        const archived = process.env.EMAIL_ARCHIVE?.trim();
+        console.log(
+          `email: sent "${title}" (${epub.length} bytes) to ${to}` +
+            (archived && archived.toLowerCase() !== to.toLowerCase()
+              ? ` (copia a ${archived})`
+              : ""),
+        );
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "No se pudo convertir el archivo.";

@@ -79,6 +79,8 @@ Abrí http://localhost:3000.
 | `BLOB_READ_WRITE_TOKEN` | para archivos >4 MB | Token de Vercel Blob. Se auto-setea al conectar un Blob store. |
 | `RESEND_API_KEY` | no | Solo si querés enviar el ePub por email. https://resend.com/ |
 | `EMAIL_FROM` | no | Remitente, ej. `Wiki Editor <editor@tudominio.com>`. Sin dominio verificado, Resend solo entrega al dueño de la cuenta. |
+| `EMAIL_ARCHIVE` | no | Copia cada ePub generado a esta dirección (tu archivo personal). Los avisos de error también van acá. |
+| `NEXT_PUBLIC_SENDER_EMAIL` | no | Dirección que la app muestra en las instrucciones del Kindle como remitente a aprobar. Debería coincidir con `EMAIL_FROM`. |
 
 Sin `ANTHROPIC_API_KEY` la conversión falla (500).
 
@@ -120,6 +122,10 @@ Para que llegue **directo al Kindle**:
    E-mail List**.
 3. Usá tu dirección `@kindle.com` como destinatario. Amazon convierte el EPUB
    al formato Kindle automáticamente.
+
+Conviene además definir `EMAIL_ARCHIVE` con una casilla normal: te queda una
+copia de cada libro y, sobre todo, es el único lugar donde vas a ver los avisos
+de error — Amazon descarta en silencio todo lo que no sea un documento.
 
 ## OCR de PDFs escaneados
 
