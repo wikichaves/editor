@@ -187,7 +187,13 @@ export default function Home() {
                 <input
                   type="email"
                   inputMode="email"
-                  autoComplete="email"
+                  // Keep the browser / password managers from silently filling a
+                  // saved address: the recipient should only come from ?email=,
+                  // the remembered value, or what you type.
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
+                  name="recipient"
                   placeholder="vos@ejemplo.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
