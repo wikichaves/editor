@@ -5,7 +5,11 @@ import { detectKind, extractBookText } from "@/lib/extract";
 import { transformText, translateTitle } from "@/lib/translate";
 import { ocrPdf } from "@/lib/ocr";
 import { retellForChild } from "@/lib/retell";
-import { extractPdfCover } from "@/lib/cover";
+import {
+  extractPdfCover,
+  extractEpubCover,
+  generateTextCover,
+} from "@/lib/cover";
 import { buildEpub, buildEpubFromChapters, type ChapterInput } from "@/lib/epub";
 import { emailEpub, emailFailure } from "@/lib/email";
 
@@ -68,7 +72,7 @@ async function buildEpubJob(
   if (!kind) throw new Error("Formato no reconocido. Subí un PDF, EPUB o AZW3.");
 
   // Keep a copy for cover extraction before pdf.js detaches the buffer.
-  const coverSource = kind === "pdf" ? data.slice() : null;
+  const coverSource = kind === "pdf" || kind === "epub" ? data.slice() : null;
 
   // Extract from a COPY: pdf.js detaches the buffer it reads, and we still need
   // the original bytes if we fall back to OCR.
@@ -126,15 +130,24 @@ async function buildEpubJob(
     }
   }
 
-  // Best-effort cover for PDFs: most prominent image, grayscaled for e-readers.
+  // Cover: the book's own artwork when we can find it (PDF page image / EPUB
+  // cover entry), otherwise a generated title card — every book gets one so
+  // they stay distinguishable in the e-reader library.
   let cover: Buffer | undefined;
   if (coverSource) {
     try {
-      cover = (await extractPdfCover(coverSource)) ?? undefined;
+      cover =
+        (kind === "epub"
+          ? await extractEpubCover(coverSource)
+          : await extractPdfCover(coverSource)) ?? undefined;
     } catch {
       cover = undefined;
     }
   }
+  if (!cover) {
+    cover = (await generateTextCover(title).catch(() => null)) ?? undefined;
+  }
+  console.log(`job: cover=${cover ? `${cover.length}b` : "none"}`);
 
   const epub = chapters
     ? await buildEpubFromChapters(title, chapters, cover)

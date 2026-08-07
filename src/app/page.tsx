@@ -24,13 +24,36 @@ interface ConvertResult {
 export default function Home() {
   const [status, setStatus] = React.useState<Status>("idle");
   const [fileName, setFileName] = React.useState("");
-  const [email, setEmail] = React.useState("vos@kindle.com");
+  const [email, setEmail] = React.useState("");
   const [error, setError] = React.useState("");
   const [progress, setProgress] = React.useState(0);
   const [result, setResult] = React.useState<ConvertResult | null>(null);
   const [translate, setTranslate] = React.useState(true);
   const [summarize, setSummarize] = React.useState(false);
   const [simplify, setSimplify] = React.useState(false);
+
+  // Prefill the recipient from `?email=…` and remember it locally, so you can
+  // bookmark the URL once (e.g. …/?email=tu@kindle.com) and it stays filled in
+  // on later visits. Nothing personal is baked into the code.
+  const REMEMBERED_EMAIL_KEY = "editor:email";
+  React.useEffect(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("email");
+    if (fromUrl) {
+      setEmail(fromUrl);
+      try {
+        localStorage.setItem(REMEMBERED_EMAIL_KEY, fromUrl);
+      } catch {
+        // private mode / storage disabled — the URL still works
+      }
+      return;
+    }
+    try {
+      const saved = localStorage.getItem(REMEMBERED_EMAIL_KEY);
+      if (saved) setEmail(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   async function handleFile(file: File) {
     setFileName(file.name);
