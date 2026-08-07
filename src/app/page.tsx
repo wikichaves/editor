@@ -17,6 +17,9 @@ type Status = "idle" | "uploading" | "processing" | "done" | "error";
 /** Above this size a conversion takes long enough that we require an email. */
 const SLOW_JOB_BYTES = 1024 * 1024;
 
+/** Sender address to approve in Amazon, when the deployment advertises one. */
+const SENDER_EMAIL = process.env.NEXT_PUBLIC_SENDER_EMAIL ?? "";
+
 interface ConvertResult {
   title?: string;
   downloadUrl?: string;
@@ -34,7 +37,8 @@ export default function Home() {
   const [result, setResult] = React.useState<ConvertResult | null>(null);
   const [translate, setTranslate] = React.useState(true);
   const [summarize, setSummarize] = React.useState(false);
-  const [simplify, setSimplify] = React.useState(false);
+  const [simplify, setSimplify] = React.useState(true);
+  const [showKindleHelp, setShowKindleHelp] = React.useState(false);
 
   // Prefill the recipient from `?email=…` and remember it locally, so you can
   // bookmark the URL once (e.g. …/?email=tu@kindle.com) and it stays filled in
@@ -188,23 +192,72 @@ export default function Home() {
     <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-4 py-12">
       <Card>
         <CardHeader>
-          <CardTitle className="text-2xl">PDF · EPUB · AZW3 → ePub</CardTitle>
+          <CardTitle className="text-2xl">Wiki Editor</CardTitle>
           <CardDescription className="text-base">
-            Convertí un libro a ePub, traducido al español si querés.
+            Simplificá un libro para tu hijo, en español
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {status === "idle" && (
             <>
-              <label className="block space-y-1.5">
-                <span className="text-base font-medium">
-                  Email {simplify && <span className="font-normal text-[var(--muted-foreground)]">(necesario)</span>}
-                </span>
-                <span className="block text-sm font-normal text-[var(--muted-foreground)]">
+              <div className="space-y-1.5">
+                <label htmlFor="recipient" className="block text-base font-medium">
+                  Email{" "}
+                  {simplify && (
+                    <span className="font-normal text-[var(--muted-foreground)]">
+                      (necesario)
+                    </span>
+                  )}
+                </label>
+                <p className="text-sm text-[var(--muted-foreground)]">
                   Te lo mandamos cuando esté listo. Con una dirección @kindle.com
-                  llega directo al Kindle.
-                </span>
+                  llega directo al Kindle —{" "}
+                  <button
+                    type="button"
+                    onClick={() => setShowKindleHelp((v) => !v)}
+                    className="underline underline-offset-2 hover:text-[var(--foreground)]"
+                  >
+                    cómo configurarlo
+                  </button>
+                  .
+                </p>
+                {showKindleHelp && (
+                  <div className="space-y-2 rounded-lg border border-[var(--border)] bg-[var(--muted)]/40 px-3 py-3 text-sm text-[var(--muted-foreground)]">
+                    <p>
+                      Amazon solo acepta documentos enviados desde direcciones que
+                      vos autorices. Se hace una sola vez:
+                    </p>
+                    <p>
+                      1. Entrá a{" "}
+                      <a
+                        href="https://www.amazon.com/hz/mycd/myx#/home/settings/pdoc"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2 hover:text-[var(--foreground)]"
+                      >
+                        Personal Document Settings
+                      </a>{" "}
+                      (Manage Your Content and Devices → Preferences).
+                    </p>
+                    <p>
+                      2. En <em>Approved Personal Document E-mail List</em>, agregá{" "}
+                      {SENDER_EMAIL ? (
+                        <strong className="text-[var(--foreground)]">
+                          {SENDER_EMAIL}
+                        </strong>
+                      ) : (
+                        "la dirección desde la que te enviamos"
+                      )}
+                      .
+                    </p>
+                    <p>
+                      3. Ahí mismo figura tu dirección @kindle.com: usala acá
+                      arriba.
+                    </p>
+                  </div>
+                )}
                 <input
+                  id="recipient"
                   type="email"
                   inputMode="email"
                   // Keep the browser / password managers from silently filling a
@@ -219,6 +272,24 @@ export default function Home() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="w-full rounded-lg border border-[var(--border)] bg-transparent px-3 py-2.5 text-base outline-none focus:border-[var(--primary)]"
                 />
+              </div>
+
+              <label className="flex items-start gap-2.5 rounded-lg border border-[var(--primary)]/40 bg-[var(--primary)]/5 px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={simplify}
+                  onChange={(e) => setSimplify(e.target.checked)}
+                  className="mt-0.5 size-4"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-base font-medium">
+                    Simplificar para chicos (5-7 años)
+                  </span>
+                  <span className="block text-sm text-[var(--muted-foreground)]">
+                    Lo recuenta como cuento para leer en voz alta, en capítulos de
+                    ~20 min: uno por noche.
+                  </span>
+                </span>
               </label>
 
               <div
@@ -259,24 +330,6 @@ export default function Home() {
                   </span>
                 </label>
               </div>
-
-              <label className="flex items-start gap-2.5 rounded-lg border border-[var(--primary)]/40 bg-[var(--primary)]/5 px-3 py-3">
-                <input
-                  type="checkbox"
-                  checked={simplify}
-                  onChange={(e) => setSimplify(e.target.checked)}
-                  className="mt-0.5 size-4"
-                />
-                <span className="space-y-0.5">
-                  <span className="block text-base font-medium">
-                    Simplificar para chicos (5-7 años) 🧸
-                  </span>
-                  <span className="block text-sm text-[var(--muted-foreground)]">
-                    Lo recuenta como cuento para leer en voz alta, en capítulos de
-                    ~20 min: uno por noche.
-                  </span>
-                </span>
-              </label>
 
               <Dropzone onFile={handleFile} onReject={handleReject} />
             </>
@@ -369,7 +422,7 @@ export default function Home() {
       </Card>
 
       <p className="mt-4 text-center text-sm text-[var(--muted-foreground)]">
-        Con Claude · OCR para escaneados · Sin imágenes
+        Con Claude · OCR para escaneados
       </p>
       <p className="mt-1 text-center text-xs text-[var(--muted-foreground)]/70">
         {process.env.NEXT_PUBLIC_APP_VERSION ?? "v?"}
