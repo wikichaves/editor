@@ -1,4 +1,5 @@
 import epubGen from "epub-gen-memory";
+import JSZip from "jszip";
 
 // epub-gen-memory is a CJS module. Depending on the bundler's interop, the
 // callable is either the default export itself or nested at `.default`.
@@ -6,6 +7,53 @@ const epub: typeof epubGen =
   typeof epubGen === "function"
     ? epubGen
     : (epubGen as unknown as { default: typeof epubGen }).default;
+
+/**
+ * epub-gen-memory adds the image and its OPF metadata, but does not create a
+ * cover XHTML page or a `guide` reference. Kindle's mail converter commonly
+ * ignores an image-only cover, so add both parts of the EPUB convention.
+ */
+async function addKindleCoverPage(book: Buffer): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(book);
+  const opfFile = zip.file("OEBPS/content.opf");
+  if (!opfFile) return book;
+
+  let opf = await opfFile.async("string");
+  if (!/id="image_cover"/.test(opf) || /id="cover-page"/.test(opf)) {
+    return book;
+  }
+
+  zip.file(
+    "OEBPS/cover.xhtml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Portada</title><style>html,body{margin:0;padding:0;height:100%;}body{display:flex;align-items:center;justify-content:center;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head>
+<body><img src="cover.jpeg" alt="Portada"/></body>
+</html>`,
+  );
+
+  opf = opf.replace(
+    /<\/manifest>/,
+    '        <item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml" />\n    </manifest>',
+  );
+  opf = opf.replace(
+    /<spine([^>]*)>/,
+    '<spine$1>\n        <itemref idref="cover-page" linear="no"/>',
+  );
+  opf = opf.replace(
+    /<guide>([\s\S]*?)<\/guide>/,
+    '<guide>\n        <reference type="cover" title="Portada" href="cover.xhtml" />$1</guide>',
+  );
+  zip.file("OEBPS/content.opf", opf);
+  return Buffer.from(
+    await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 9 },
+    }),
+  );
+}
 
 function escapeHtml(s: string): string {
   return s
@@ -81,7 +129,8 @@ async function assemble(
       type: "image/jpeg",
     });
   }
-  return epub(options, content);
+  const book = await epub(options, content);
+  return coverImage ? addKindleCoverPage(book) : book;
 }
 
 /**
