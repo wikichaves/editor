@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { PDFDocument } from "pdf-lib";
 import { TRANSLATION_MODEL, type TransformOpts } from "./translate";
 
@@ -25,31 +25,28 @@ function ocrPromptFor({ translate, summarize }: TransformOpts): string {
 
 /** Send one PDF (base64) to Claude and return the extracted text. */
 async function ocrOne(
-  client: Anthropic,
+  client: OpenAI,
   base64: string,
   prompt: string,
 ): Promise<string> {
-  const message = await client.messages.create({
+  const response = await client.responses.create({
     model: TRANSLATION_MODEL,
-    max_tokens: 16000,
-    messages: [
+    max_output_tokens: 16000,
+    input: [
       {
         role: "user",
         content: [
           {
-            type: "document",
-            source: { type: "base64", media_type: "application/pdf", data: base64 },
+            type: "input_file",
+            filename: "documento.pdf",
+            file_data: base64,
           },
-          { type: "text", text: prompt },
+          { type: "input_text", text: prompt },
         ],
       },
     ],
   });
-  return message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
+  return response.output_text.trim();
 }
 
 /** Run `fn` over items with a concurrency cap, preserving order. */
@@ -77,7 +74,7 @@ async function mapLimit<T, R>(
  * parallel so the job stays within the function time limit. No rasterization.
  */
 export async function ocrPdf(
-  client: Anthropic,
+  client: OpenAI,
   pdf: Uint8Array,
   opts: TransformOpts,
 ): Promise<string> {

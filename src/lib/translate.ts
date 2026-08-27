@@ -1,10 +1,10 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 
 /**
  * Translation model. Swap for the cheaper alternative if cost matters:
  *   "claude-haiku-4-5-20251001"
  */
-export const TRANSLATION_MODEL = "claude-sonnet-4-6";
+export const TRANSLATION_MODEL = "gpt-5-mini";
 
 const SYSTEM_PROMPT =
   "You are a professional literary translator. Translate the text from English to Spanish. Preserve paragraph breaks exactly. Do not add notes, explanations, or markdown. Output only the translation.";
@@ -93,7 +93,7 @@ async function mapLimit<T, R>(
  * Chunks are processed in parallel (bounded) so long books finish in time.
  */
 export async function transformText(
-  client: Anthropic,
+  client: OpenAI,
   fullText: string,
   opts: TransformOpts,
 ): Promise<string> {
@@ -103,17 +103,13 @@ export async function transformText(
   const chunks = chunkText(fullText);
 
   const out = await mapLimit(chunks, CONCURRENCY, async (chunk) => {
-    const message = await client.messages.create({
+    const response = await client.responses.create({
       model: TRANSLATION_MODEL,
-      max_tokens: 8192,
-      system,
-      messages: [{ role: "user", content: chunk }],
+      max_output_tokens: 8192,
+      instructions: system,
+      input: chunk,
     });
-    return message.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("")
-      .trim();
+    return response.output_text.trim();
   });
 
   return out.join("\n\n");
@@ -124,24 +120,20 @@ export async function transformText(
  * to the input if the model returns nothing.
  */
 export async function translateTitle(
-  client: Anthropic,
+  client: OpenAI,
   title: string,
 ): Promise<string> {
   if (!title.trim()) return title;
 
-  const message = await client.messages.create({
+  const response = await client.responses.create({
     model: TRANSLATION_MODEL,
-    max_tokens: 200,
-    system:
+    max_output_tokens: 200,
+    instructions:
       "Traducí el título de libro del inglés al español. Devolvé SOLO el título traducido, sin comillas, sin explicaciones ni texto extra. Si ya está en español o es un nombre propio, devolvelo tal cual.",
-    messages: [{ role: "user", content: title }],
+    input: title,
   });
 
-  const out = message.content
-    .filter((block): block is Anthropic.TextBlock => block.type === "text")
-    .map((block) => block.text)
-    .join("")
-    .trim();
+  const out = response.output_text.trim();
 
   return out || title;
 }

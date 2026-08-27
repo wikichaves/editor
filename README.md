@@ -58,14 +58,14 @@ memoria** — nunca se escribe a disco, así funciona en serverless.
 
 - Next.js 15 (App Router) + React 19 + TypeScript
 - Tailwind v4 + componentes estilo shadcn/ui
-- `@anthropic-ai/sdk`, `unpdf`, `jszip`, `pdf-lib`, `sharp`,
+- `openai`, `unpdf`, `jszip`, `pdf-lib`, `sharp`,
   `epub-gen-memory`, `@vercel/blob`, `resend`
 
 ## Setup local
 
 ```bash
 npm install
-cp .env.example .env.local   # y completá ANTHROPIC_API_KEY
+cp .env.example .env.local   # y completá OPENAI_API_KEY
 npm run dev
 ```
 
@@ -75,14 +75,14 @@ Abrí http://localhost:3000.
 
 | Variable | Requerida | Descripción |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | sí | API key de Anthropic. https://console.anthropic.com/ |
+| `OPENAI_API_KEY` | sí | API key de OpenAI. https://platform.openai.com/api-keys |
 | `BLOB_READ_WRITE_TOKEN` | para archivos >4 MB | Token de Vercel Blob. Se auto-setea al conectar un Blob store. |
 | `RESEND_API_KEY` | no | Solo si querés enviar el ePub por email. https://resend.com/ |
 | `EMAIL_FROM` | no | Remitente, ej. `Wiki Editor <editor@tudominio.com>`. Sin dominio verificado, Resend solo entrega al dueño de la cuenta. |
 | `EMAIL_ARCHIVE` | no | Copia cada ePub generado a esta dirección (tu archivo personal). Los avisos de error también van acá. |
 | `NEXT_PUBLIC_SENDER_EMAIL` | no | Dirección que la app muestra en las instrucciones del Kindle como remitente a aprobar. Debería coincidir con `EMAIL_FROM`. |
 
-Sin `ANTHROPIC_API_KEY` la conversión falla (500).
+Sin `OPENAI_API_KEY` la conversión falla (500).
 
 ### Prefijar el destinatario
 
@@ -141,7 +141,7 @@ archivo (ver `src/lib/ocr.ts`).
    (autodetectado).
 2. **Conectá un Blob store**: *Storage → Create → Blob*. Eso agrega
    `BLOB_READ_WRITE_TOKEN` automáticamente.
-3. Cargá `ANTHROPIC_API_KEY` (y `RESEND_API_KEY` / `EMAIL_FROM` si vas a usar
+3. Cargá `OPENAI_API_KEY` (y `RESEND_API_KEY` / `EMAIL_FROM` si vas a usar
    email) en *Settings → Environment Variables*.
 4. Deploy.
 

@@ -1,4 +1,4 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import type OpenAI from "openai";
 import { TRANSLATION_MODEL, chunkText } from "./translate";
 import type { ChapterInput } from "./epub";
 
@@ -49,27 +49,19 @@ async function mapLimit<T, R>(
   return results;
 }
 
-function textOf(message: Anthropic.Message): string {
-  return message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-}
-
 async function complete(
-  client: Anthropic,
+  client: OpenAI,
   system: string,
   user: string,
   maxTokens: number,
 ): Promise<string> {
-  const message = await client.messages.create({
+  const response = await client.responses.create({
     model: TRANSLATION_MODEL,
-    max_tokens: maxTokens,
-    system,
-    messages: [{ role: "user", content: user }],
+    max_output_tokens: maxTokens,
+    instructions: system,
+    input: user,
   });
-  return textOf(message);
+  return response.output_text.trim();
 }
 
 const MAP_SYSTEM =
@@ -77,7 +69,7 @@ const MAP_SYSTEM =
 
 /** Map step: condense each chunk of the source into ordered beats. */
 async function summariseChunks(
-  client: Anthropic,
+  client: OpenAI,
   fullText: string,
 ): Promise<string[]> {
   const chunks = chunkText(fullText, MAP_CHUNK_CHARS);
@@ -94,7 +86,7 @@ const SYNOPSIS_SYSTEM =
 
 /** Reduce step: fold chunk summaries into one coherent full-story synopsis. */
 async function buildSynopsis(
-  client: Anthropic,
+  client: OpenAI,
   summaries: string[],
 ): Promise<string> {
   let level = summaries;
@@ -152,7 +144,7 @@ function parsePlan(raw: string): PlannedChapter[] | null {
 
 /** Plan step: decide the chapters (5–10) and what each one covers. */
 async function planChapters(
-  client: Anthropic,
+  client: OpenAI,
   synopsis: string,
 ): Promise<PlannedChapter[]> {
   const system =
@@ -179,7 +171,7 @@ function tidyTitle(raw: string, n: number): string {
 
 /** Write step: turn one planned chapter into finished bedtime prose. */
 async function writeChapter(
-  client: Anthropic,
+  client: OpenAI,
   synopsis: string,
   titles: string[],
   index: number,
@@ -215,7 +207,7 @@ function countWords(s: string): number {
  * Returns the finished chapters ready for the ePub builder.
  */
 export async function retellForChild(
-  client: Anthropic,
+  client: OpenAI,
   fullText: string,
 ): Promise<ChapterInput[]> {
   if (!fullText.trim()) {

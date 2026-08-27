@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import { detectKind, extractBookText } from "@/lib/extract";
 import { transformText, translateTitle } from "@/lib/translate";
 import { ocrPdf } from "@/lib/ocr";
@@ -40,7 +40,7 @@ export async function buildEpubJob(
     );
   }
 
-  const client = new Anthropic();
+  const client = new OpenAI();
   const t0 = Date.now();
   console.log(
     `job: kind=${kind} needsOcr=${needsOcr} textLen=${extracted.length} translate=${opts.translate} summarize=${opts.summarize} simplify=${opts.simplify}`,

@@ -47,9 +47,9 @@ async function assembleChunks(
 }
 
 export async function POST(req: NextRequest) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.OPENAI_API_KEY) {
     return NextResponse.json(
-      { error: "Falta ANTHROPIC_API_KEY en el servidor." },
+      { error: "Falta OPENAI_API_KEY en el servidor." },
       { status: 500 },
     );
   }
