@@ -422,7 +422,7 @@ export default function Home() {
       </Card>
 
       <p className="mt-4 text-center text-sm text-[var(--muted-foreground)]">
-        Con Claude · OCR para escaneados
+        Con OpenAI · OCR para escaneados
       </p>
       <p className="mt-1 text-center text-xs text-[var(--muted-foreground)]/70">
         {process.env.NEXT_PUBLIC_APP_VERSION ?? "v?"}
