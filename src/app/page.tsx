@@ -287,7 +287,7 @@ export default function Home() {
                   </span>
                   <span className="block text-sm text-[var(--muted-foreground)]">
                     Lo recuenta como cuento para leer en voz alta, en capítulos de
-                    ~20 min: uno por noche.
+                    15-20 min.
                   </span>
                 </span>
               </label>

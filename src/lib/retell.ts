@@ -4,7 +4,7 @@ import type { ChapterInput } from "./epub";
 
 /**
  * "Simplificar para chicos" mode: retell a whole book as a small series of
- * bedtime chapters for a 5–7 year old, in Rioplatense Spanish.
+ * read-aloud chapters for a 5–7 year old, in Rioplatense Spanish.
  *
  * This is NOT a per-chunk transform (like translate/summarize). To honour a
  * total length and a chapter structure, we first *understand the whole book*
@@ -12,10 +12,10 @@ import type { ChapterInput } from "./epub";
  * to the original story, simplified in language, gentle with hard content.
  */
 
-// Read-aloud pace for a bedtime story with a young child (words per minute).
-const WORDS_PER_MIN = 120;
-// Target ~18 min per chapter (aim under 20), so ~2160 words.
-const TARGET_WORDS_PER_CHAPTER = 2160;
+// Real read-aloud pace with a young child, including pauses (words per minute).
+const WORDS_PER_MIN = 105;
+// Target ~16 min per chapter, leaving room for pauses without exceeding 20.
+const TARGET_WORDS_PER_CHAPTER = 1700;
 const MIN_CHAPTERS = 5;
 const MAX_CHAPTERS = 10;
 
@@ -148,7 +148,7 @@ async function planChapters(
   synopsis: string,
 ): Promise<PlannedChapter[]> {
   const system =
-    `Sos un editor de cuentos para chicos. A partir de la sinopsis de un libro, dividí la historia en capítulos para leer en voz alta a un nene de 5 a 7 años, uno por noche. ` +
+    `Sos un editor de cuentos para chicos. A partir de la sinopsis de un libro, dividí la historia en capítulos para leer en voz alta a un nene de 5 a 7 años. ` +
     `Elegí entre ${MIN_CHAPTERS} y ${MAX_CHAPTERS} capítulos según cuánta historia haya: cada capítulo debe dar para unos 15-20 minutos de lectura en voz alta (ni más). Si la historia es simple, tendé a ${MIN_CHAPTERS}. ` +
     `Los capítulos deben cubrir TODA la historia en orden, sin huecos ni repeticiones. ` +
     `Devolvé SOLO un arreglo JSON, sin texto extra, con este formato: ` +
@@ -169,7 +169,7 @@ function tidyTitle(raw: string, n: number): string {
   return `Capítulo ${n}: ${short || "El cuento"}`;
 }
 
-/** Write step: turn one planned chapter into finished bedtime prose. */
+/** Write step: turn one planned chapter into finished read-aloud prose. */
 async function writeChapter(
   client: OpenAI,
   synopsis: string,
@@ -178,13 +178,14 @@ async function writeChapter(
   chapter: PlannedChapter,
 ): Promise<string> {
   const system =
-    `Sos un narrador que recuenta libros para chicos de 5 a 7 años, para leerles en voz alta antes de dormir. Escribí en ESPAÑOL RIOPLATENSE (de Argentina): usá "vos" en vez de "tú", el voseo en los verbos (tenés, mirá, vení), y un tono cálido y natural de cuento de noche.\n\n` +
+    `Sos un narrador que recuenta libros para chicos de 5 a 7 años, para leerles en voz alta en cualquier momento del día. Escribí en ESPAÑOL RIOPLATENSE (de Argentina): usá "vos" en vez de "tú", el voseo en los verbos (tenés, mirá, vení), y un tono cálido y natural.\n\n` +
     `Reglas:\n` +
     `- FIEL pero simplificado: respetá la misma historia, los personajes y la trama del libro; no inventes otra historia. Simplificá el lenguaje y acortá.\n` +
     `- Vocabulario rico y un poco desafiante, pero siempre claro y entendible para esa edad. Nada de arcaísmos ni lenguaje anticuado.\n` +
     `- Quitá sexualidad y complejidades innecesarias.\n` +
     `- Con lo difícil (muerte, miedo, violencia, pérdidas) NO lo borres si es importante para la historia: contalo con mucha delicadeza, calidez y esperanza, apropiado para un nene chico.\n` +
-    `- Extensión: alrededor de 1900-2400 palabras (unos 18-20 minutos de lectura en voz alta). Priorizá que el cuento fluya natural por sobre el número exacto.\n` +
+    `- Extensión: alrededor de 1500-1900 palabras (unos 15-20 minutos de lectura en voz alta, contando pausas). No superes las 1900 palabras.\n` +
+    `- Empezá directamente con la historia y cerrá en un punto narrativo natural. No le des instrucciones al lector ni al chico, no pidas cerrar los ojos, no menciones dormir, la noche, la hora de acostarse ni cuándo se está leyendo. Evitá también introducciones o despedidas que hablen del acto de leer.\n` +
     `- NO escribas el título ni "Capítulo N": solo el cuerpo del capítulo. Separá los párrafos con una línea en blanco. No uses markdown ni viñetas.`;
 
   const user =
@@ -203,7 +204,7 @@ function countWords(s: string): number {
 }
 
 /**
- * Retell a book as bedtime chapters for a young child (Rioplatense Spanish).
+ * Retell a book as read-aloud chapters for a young child (Rioplatense Spanish).
  * Returns the finished chapters ready for the ePub builder.
  */
 export async function retellForChild(
